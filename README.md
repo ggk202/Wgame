@@ -64,7 +64,13 @@ Interiors are built for both thrust gravity and zero-g:
 
 Static geometry is merged by material, so the detail stays cheap to draw.
 
-**Console sounds:** the panels chatter like a 1979 ship's computer: soft data blips, key clicks and latching switches.
+**Sounds:** most effects are synthesized in code. Three recorded CC0/CC-BY sounds are trimmed, looped and normalised in `sounds/`, with credits in `sounds/CREDITS.md`:
+
+* **Consoles:** opening a console plays a computer start-up (power thunk and spin-up whine), which then settles into a looping running hum.
+* **PDCs:** the gatlings fire with a recorded Phalanx CIWS burst.
+* **Malfunction alarm:** this marks real ship trouble. One tone sounds per fault, fire or breach. The full alarm repeats during red alert while something is burning, breached, destroyed or the reactor is down. Combat alone keeps the synthesized klaxon.
+
+If a recording fails to load, everything falls back to synthesis.
 
 ## Flying the ship
 

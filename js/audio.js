@@ -1,4 +1,5 @@
-// Tiny synthesized sound set (no audio files needed).
+// Synthesized sounds plus a few recorded effects (sounds/). Everything falls back to synthesis if a file can't load.
+import { SOUND_URLS } from './sounds.js';
 export class Sfx {
   constructor() { this.ctx = null; this.muted = false; this.alarmOn = false; this.alarmT = 0; }
   now() { return this.ctx.currentTime + (this.off || 0); } // `off` lets an offline renderer replay logged events at their times
@@ -10,7 +11,27 @@ export class Sfx {
       this.ctx = new AC();
       this.master = this.ctx.createGain(); this.master.gain.value = 0.5; this.master.connect(this.ctx.destination);
       this.startHum();
+      this.loadSamples();
     } catch (e) { this.ctx = null; }
+  }
+  // ---- recorded samples ----
+  loadSamples() {
+    this.buf = {};
+    for (const [k, url] of Object.entries(SOUND_URLS)) {
+      const get = url.startsWith('data:')
+        ? Promise.resolve(Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), (c) => c.charCodeAt(0)).buffer)
+        : fetch(url).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); });
+      get.then((ab) => new Promise((res, rej) => this.ctx.decodeAudioData(ab, res, rej))).then((b) => { this.buf[k] = b; }).catch(() => {});
+    }
+  }
+  sample(name, { vol = 1, rate = 1, delay = 0, loop = false, offset = 0, loopStart = 0, loopEnd = 0, dest = null } = {}) {
+    if (!this.ctx || !this.buf || !this.buf[name]) return null;
+    const c = this.ctx, t = this.now() + delay;
+    const src = c.createBufferSource(); src.buffer = this.buf[name]; src.playbackRate.value = rate; src.loop = loop;
+    if (loop) { src.loopStart = loopStart; src.loopEnd = loopEnd || src.buffer.duration; }
+    const g = c.createGain(); g.gain.value = vol;
+    src.connect(g); g.connect(dest || this.master); src.start(t, offset);
+    return { src, g, t };
   }
   setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.5; }
   noiseBuf() {
@@ -50,6 +71,11 @@ export class Sfx {
   play(name) {
     if (!this.ctx || this.muted) return;
     switch (name) {
+      case 'shipwarn': { // a fault, fire or breach: one tone of the ship's malfunction alarm (rate-limited)
+        const t = this.now(); if (t - (this.lastWarn || -9) < 1.5) break; this.lastWarn = t;
+        if (!this.sample('alarmBeep', { vol: 0.28 })) { this.tone(520, 0.15, 'square', 0.06); this.tone(390, 0.2, 'square', 0.06, 0, 0.17); }
+        break;
+      }
       case 'click': this.tone(900, 0.04, 'square', 0.05); break;
       case 'hit': this.noise(1.2, 0.9, 1200); this.tone(70, 0.8, 'sine', 0.6, -40); break;
       case 'boom': this.noise(0.8, 0.3, 400); break;
@@ -130,6 +156,11 @@ export class Sfx {
   // weapons
   gatling(dur = 1.2, n = 1) { // ~65 rounds/s per gun: a ripping buzz of individual reports
     if (!this.ctx || this.muted) return;
+    if (this.buf && this.buf.pdc) { // recorded Phalanx burst; more turrets = a second, slightly detuned gun just behind
+      this.sample('pdc', { vol: 0.75, rate: 0.96 + Math.random() * 0.08 });
+      if (n > 1) this.sample('pdc', { vol: 0.45, rate: 0.9 + Math.random() * 0.06, delay: 0.06 + Math.random() * 0.05 });
+      return;
+    }
     const c = this.ctx, t = this.now();
     const src = c.createBufferSource(); src.buffer = this.noiseBuf(); src.loop = true;
     const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.8;
@@ -148,6 +179,23 @@ export class Sfx {
   bootBeep(vol = 1, delay = 0) { this.chirp(1396, 0.07, 0.04 * vol, delay); this.chirp(2093, 0.05, 0.03 * vol, delay + 0.08); }
   setConsoleHum(on) {
     if (!this.ctx) return;
+    if (this.buf && this.buf.consoleLoop) { // recorded computer: start-up thunk and spin-up, then the running hum, looped
+      const want = on && !this.muted;
+      if (want && !this.amb) {
+        const out = this.ctx.createGain(); out.gain.value = 0.55; out.connect(this.master);
+        const st = this.buf.consoleStart && (!this.ambOffAt || this.now() - this.ambOffAt > 4) ? this.sample('consoleStart', { vol: 0.8, dest: out }) : null;
+        const lead = st ? this.buf.consoleStart.duration - 0.7 : 0;
+        const lp = this.sample('consoleLoop', { vol: 0.0001, loop: true, loopStart: 0.03, loopEnd: this.buf.consoleLoop.duration - 0.03, delay: lead, dest: out });
+        if (lp) { lp.g.gain.setValueAtTime(0.0001, lp.t); lp.g.gain.exponentialRampToValueAtTime(0.9, lp.t + 0.6); }
+        this.amb = { out, st, lp };
+      } else if (!want && this.amb) {
+        const { out, st, lp } = this.amb, t = this.now();
+        out.gain.setTargetAtTime(0, t, 0.15);
+        for (const x of [st, lp]) if (x) try { x.src.stop(t + 0.8); } catch (e) {}
+        this.amb = null; this.ambOffAt = t;
+      }
+      return;
+    }
     if (!this.chum) {
       const c = this.ctx;
       const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 120;
@@ -163,6 +211,7 @@ export class Sfx {
   // occasional relay chatter: louder while working at a console, faint ambience near live consoles
   idle(dt, focused, nearConsoles) {
     if (!this.ctx || this.muted) return;
+    if (this.buf && this.buf.consoleLoop) { if (!focused && Math.random() < 0.05 * Math.min(4, nearConsoles) * dt) this.relay(0.15); return; }
     const rate = focused ? 0.45 : 0.1 * Math.min(4, nearConsoles);
     if (Math.random() < rate * dt) { if (Math.random() < 0.65) this.chatter(focused ? 0.8 : 0.3); else this.relay(focused ? 0.5 : 0.18); }
   }
@@ -190,12 +239,16 @@ export class Sfx {
       this.rec.stop();
     });
   }
-  tick(dt, alert) {
+  tick(dt, alert, issue = false) {
     if (!this.ctx || this.muted) return;
     if (this.hum) this.hum.o.frequency.value = alert === 'red' ? 52 : 48;
-    if (alert === 'red') {
+    if (alert === 'red' || (issue && alert === 'yellow')) {
       this.alarmT -= dt;
-      if (this.alarmT <= 0) { this.alarmT = 6; this.tone(620, 0.5, 'triangle', 0.07, -200); this.tone(620, 0.5, 'triangle', 0.07, -200, 0.7); }
+      if (this.alarmT <= 0) {
+        this.alarmT = 9;
+        // ship in trouble (fire, breach, dead system, reactor down): the recorded malfunction alarm; combat alone: the synth klaxon
+        if (!(issue && this.sample('alarm', { vol: 0.32 }))) { this.alarmT = 6; this.tone(620, 0.5, 'triangle', 0.07, -200); this.tone(620, 0.5, 'triangle', 0.07, -200, 0.7); }
+      }
     } else this.alarmT = 0;
   }
 }

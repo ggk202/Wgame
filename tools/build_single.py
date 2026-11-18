@@ -25,6 +25,12 @@ for name in order:
     src = imp_re.sub('', src)
     src = three_re.sub('', src)
     src = re.sub(r'^export\s+(?=(async\s+)?(function|const|let|class)\b)', '', src, flags=re.M)
+    if name == 'sounds.js':  # inline recorded sounds as data: URIs so the single file is self-contained
+        import base64
+        def inline(m):
+            p = os.path.join(ROOT, m.group(1))
+            return "'data:audio/mpeg;base64," + base64.b64encode(open(p, 'rb').read()).decode() + "'" if os.path.exists(p) else m.group(0)
+        src = re.sub(r"'(sounds/[\w.-]+\.mp3)'", inline, src)
     parts.append(f'// ===== {name} =====\n{src}')
 js = "import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js';\nwindow.WOLFRAM_ARTIFACT = true;\n" + '\n'.join(parts)
 html = open(os.path.join(ROOT, PAGE), encoding='utf-8').read()

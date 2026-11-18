@@ -402,7 +402,7 @@ function handleFx(list) {
   for (const f of list) {
     G.ext.onFx(f);
     switch (f.type) {
-      case 'log': logLocal(f.text, f.kind); if (f.kind === 'bad') G.sfx.play('warn'); break;
+      case 'log': logLocal(f.text, f.kind); if (f.kind === 'bad') G.sfx.play('shipwarn'); break;
       case 'dock': G.sfx.relayBank(6, 1.2, 1); G.sfx.play('hit'); if (G.world) G.world.shake = 0.5; break;
       case 'toast': if (f.to === G.myId) { G.hud.toast(f.text, 'warn'); G.sfx.play('warn'); } break;
       case 'hit': if (G.world) G.world.shake = me && me.deck === f.deck ? Math.min(1.6, 0.7 + f.power) : 0.35; G.sfx.play('hit'); break;
@@ -462,7 +462,7 @@ function frame(tms) {
   G.world.render();
   if (G.panel.open) G.panel.place(G.world.focusRect());
   document.body.classList.toggle('focused', !!G.world.focus);
-  G.sfx.tick(dt, S.alert);
+  G.sfx.tick(dt, S.alert, S.breaches.length > 0 || S.hull < 40 || S.reactor.state !== 'running' || Object.values(S.comps).some((c) => c.fire > 0 || c.hp <= 0));
   // hand controllers: keys + on-screen pads while seated at the helm
   if (G.panel.open && G.panelComp === 'helm' && G.world.focus) {
     const k = G.ctl.keys, P = G.pilotTouch, b = (x) => (k[x] ? 1 : 0), c = (x) => Math.max(-1, Math.min(1, x));
