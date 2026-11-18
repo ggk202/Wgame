@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#05080c">
+<title>WOLFRAM — Cooperative Hard Sci-Fi Ship Crew</title>
+<link rel="stylesheet" href="css/style.css">
+<!--INLINE-CSS-->
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js" } }</script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+<div id="lobby">
+  <div class="lobby-inner">
+    <div class="title">WOLFRAM</div>
+    <div class="subtitle">A cooperative hard sci-fi crew simulator for 1–5 players · <span id="ver"></span></div>
+    <p class="blurb">The <b>CSV Wolfram</b> is a 4,000-tonne fusion torch freighter hauling a reactor core from Luna to Ganymede. Nobody gets assigned a role. Keep the reactor lit, the air breathable and the heat radiated, and keep the hull in one piece, while the storyteller throws pirates, proton storms, failures and opportunities at you.</p>
+    <div class="cols">
+      <div class="col">
+        <h3>You</h3>
+        <label>Name <input id="opt-name" maxlength="16" autocomplete="off"></label>
+        <div id="swatches"></div>
+        <h3>New voyage</h3>
+        <label>Difficulty <select id="opt-diff"></select></label>
+        <div class="desc" id="diff-desc"></div>
+        <label>Storyteller <select id="opt-story"></select></label>
+        <div class="desc" id="story-desc"></div>
+        <label>Campaign length <select id="opt-len"></select></label>
+      </div>
+      <div class="col">
+        <h3>Play</h3>
+        <button id="btn-host" class="btn big green mp">Host multiplayer game</button>
+        <div class="joinrow mp"><input id="opt-code" placeholder="JOIN CODE" maxlength="5" autocomplete="off" autocapitalize="characters"><button id="btn-join" class="btn big">Join</button></div>
+        <button id="btn-solo" class="btn big">Play solo</button>
+        <button id="btn-continue" class="btn big" style="display:none">Continue saved game</button>
+        <button id="btn-import" class="btn">Load save file…</button>
+        <input type="file" id="file-import" accept=".json,application/json" style="display:none">
+        <div id="lobby-msg"></div>
+        <div class="desc artnote">Solo debug build. Multiplayer (join by code) runs on the GitHub Pages version. Press <kbd>`</kbd> in game for the debug panel.</div>
+        <div class="desc mp">The host's browser runs the ship simulation. Share the 5-character code with up to 4 crewmates. Peer-to-peer via WebRTC, no server needed.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="game" style="display:none">
+  <canvas id="view"></canvas>
+  <div id="vignette"></div>
+  <div id="crosshair"></div>
+  <div id="hud">
+    <div id="alertbar"></div>
+    <div id="hud-ship" class="hudbox"></div>
+    <div id="hud-vitals" class="hudbox"></div>
+    <div id="hud-log"></div>
+    <div id="hud-prompt"></div>
+    <div id="toast"></div>
+    <div id="vote"></div>
+    <div id="codebox"></div>
+    <div id="hint">Click to look around · <kbd>H</kbd> help</div>
+  </div>
+  <div id="panel"></div>
+  <div id="chat"><div id="chatlog"></div><input id="chatinput" placeholder="Say something to the crew…" maxlength="200"></div>
+  <div id="fade"></div>
+  <div id="menu" class="overlay" style="display:none">
+    <div class="box">
+      <h2>WOLFRAM</h2>
+      <div id="menu-info" class="desc"></div>
+      <button id="btn-resume" class="btn big green">Resume</button>
+      <button id="btn-help" class="btn big">How to play</button>
+      <button id="btn-copycode" class="btn big">Copy join code</button>
+      <button id="btn-pause" class="btn big">Pause simulation</button>
+      <button id="btn-save" class="btn big">Save game (this browser)</button>
+      <button id="btn-export" class="btn big">Export save file</button>
+      <div id="exportbox" style="display:none"><textarea id="exporttext" readonly></textarea><div class="desc">Copy this text and save it as a .json file.</div></div>
+      <button id="btn-debug" class="btn big" style="display:none">Debug panel</button>
+      <button id="btn-quit" class="btn big red">Leave to lobby</button>
+    </div>
+  </div>
+  <div id="help" class="overlay" style="display:none">
+    <div class="box wide">
+      <h2>How to fly the Wolfram</h2>
+      <div class="helpcols">
+        <div>
+          <h4>Controls</h4>
+          <p><kbd>WASD</kbd> move · mouse look (click to capture) · <kbd>Shift</kbd> run<br><kbd>E</kbd> use console / pick up / lift · <kbd>Esc</kbd> close / menu<br><kbd>R</kbd> (hold) repair the thing you look at<br><kbd>F</kbd> (hold) use your item: extinguisher, hull patch, medkit, cartridge<br><kbd>G</kbd> drop item · <kbd>Tab</kbd> (hold) ship status · <kbd>T</kbd> chat · <kbd>1–4</kbd> vote · <kbd>M</kbd> mute</p>
+          <p><b>iPad:</b> left stick to move, drag the right side to look. USE / REPAIR / ITEM buttons act on whatever is in front of you.</p>
+          <h4>The ship (bottom to top)</h4>
+          <p><b>Deck 0 Drive</b>: torch drive, drive control, reaction-mass tanks, pellet injector.<br><b>Deck 1 Cargo</b>: fabricator, stores (spare kits!), drone bay (external repairs), torpedo magazine.<br><b>Deck 2 Engineering</b>: fusion reactor, power distribution, battery, thermal control, coolant pumps.<br><b>Deck 3 Habitation</b>: atmosphere control, CO₂ scrubbers, water, hydroponics, medbay, cryo bay, storm shelter.<br><b>Deck 4 Bridge</b>: helm, navigation, sensors, fire control, comms, status board.<br>Use the lift in the centre of every deck. Each deck has a red emergency locker (suits, extinguishers, patches, medkits).</p>
+        </div>
+        <div>
+          <h4>Getting started</h4>
+          <p>1. Take the lift to the <b>Bridge</b>, open the <b>Helm</b>, press <b>Undock &amp; depart</b>.<br>2. On easy difficulties, engage the <b>autopilot</b>. Otherwise ignite, set thrust, and watch the "flip in…" countdown: burn toward the target, coast, flip 180° and burn to stop.<br>3. Watch the HUD. Red alert means something needs a human.</p>
+          <h4>Survival tips</h4>
+          <p>• Heat is the enemy in space. Radiators dump it, and combat or railgun shots fill the heat sink.<br>• Above 2.2 g, crew who aren't sitting at a console (acceleration couch) get hurt.<br>• Hull breaches vent a deck. Grab a suit and a patch, and hold <kbd>F</kbd> on the breach. Venting a deck on purpose kills fires.<br>• Solar storm warning? Everyone into the blue <b>storm shelter</b> on Habitation deck.<br>• Destroyed components need a <b>Spare Parts Kit</b> from Stores (Cargo deck). External parts are fixed by drones.<br>• When you die, a backup crew member thaws from cryo. Keep the cryo bay powered.<br>• Docking at a station refuels you and gives credits to spend at Comms.</p>
+        </div>
+      </div>
+      <button id="help-close" class="btn big green">Got it</button>
+    </div>
+  </div>
+  <div id="end" class="overlay" style="display:none">
+    <div class="box">
+      <h2 id="end-title"></h2>
+      <p id="end-text"></p>
+      <div id="end-stats"></div>
+      <button id="btn-endlobby" class="btn big green">Back to lobby</button>
+    </div>
+  </div>
+</div>
+<script type="module" src="js/main.js"></script>
+<!--INLINE-JS-->
+</body>
+</html>

@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Bundle WOLFRAM into one self-contained HTML file (used for the solo debug artifact).
+Usage: python3 tools/build_single.py [out.html]"""
+import re, sys, os
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist', 'wolfram-solo.html')
+js_dir = os.path.join(ROOT, 'js')
+imp_re = re.compile(r"^import\s+(?:[\s\S]*?)\s+from\s+'(\./[^']+)';\s*$", re.M)
+three_re = re.compile(r"^import \* as THREE from 'three';\s*$", re.M)
+order, seen = [], set()
+def visit(name):
+    if name in seen: return
+    seen.add(name)
+    src = open(os.path.join(js_dir, name), encoding='utf-8').read()
+    for dep in imp_re.findall(src):
+        visit(os.path.basename(dep))
+    order.append(name)
+visit('main.js')
+parts = []
+for name in order:
+    src = open(os.path.join(js_dir, name), encoding='utf-8').read()
+    src = imp_re.sub('', src)
+    src = three_re.sub('', src)
+    src = re.sub(r'^export\s+(?=(async\s+)?(function|const|let|class)\b)', '', src, flags=re.M)
+    parts.append(f'// ===== {name} =====\n{src}')
+js = "import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js';\nwindow.WOLFRAM_ARTIFACT = true;\n" + '\n'.join(parts)
+html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
+css = open(os.path.join(ROOT, 'css', 'style.css'), encoding='utf-8').read()
+html = html.replace('<link rel="stylesheet" href="css/style.css">', '')
+html = html.replace('<!--INLINE-CSS-->', f'<style>\n{css}\n</style>')
+html = re.sub(r'<script type="importmap">.*?</script>\n', '', html)
+html = re.sub(r'<script src="https://unpkg.com/peerjs[^"]*"></script>\n', '', html)
+html = html.replace('<script type="module" src="js/main.js"></script>', '')
+html = html.replace('<!--INLINE-JS-->', f'<script type="module">\n{js}\n</script>')
+html = html.replace('<title>WOLFRAM — Cooperative Hard Sci-Fi Ship Crew</title>', '<title>WOLFRAM — Solo Debug Build</title>')
+os.makedirs(os.path.dirname(out), exist_ok=True)
+open(out, 'w', encoding='utf-8').write(html)
+print('wrote', out, len(html), 'bytes;', 'modules:', ', '.join(order))
