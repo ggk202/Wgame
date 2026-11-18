@@ -15,6 +15,13 @@ The *CSV Wolfram* is a 4,000-tonne fusion torch freighter hauling a reactor core
 * Some strict corporate or mobile networks block peer-to-peer connections (no TURN relay is configured). If joining times out, try another network.
 * The host can save at any time (Menu → Save / Export). A saved game can be reloaded and re-hosted with a new code. Players who rejoin with the same name get their character back.
 
+## Look
+
+The ship and crew follow an ISS-era, NASA-style look. It's built entirely from procedural geometry and canvas textures (no image assets), so it still loads instantly and runs on iPad:
+* **Exterior:** a white quilted-insulation crew module with a cupola-style bridge, mission markings and an original patch; an open lattice truss; white spherical tanks; gold-foil reaction-mass tanks; ISS-style radiator wings; violet auxiliary solar arrays; a shadow shield and the torch-drive nozzle. The moon or planet at each port shows below.
+* **Interior:** off-white equipment racks with placards, ISS-yellow handrails, strapped stowage bags, cable trays, laptop workstations and blue crew seats.
+* **Crew:** casual crew wear a polo in their player colour. Suited crew wear a white EMU-style spacesuit with a life-support backpack, chest control module, gold sun visor, helmet lights and colour-coded identification stripes. In first person, a helmet frame appears while suited.
+
 ## The ship
 
 | Deck | Systems |

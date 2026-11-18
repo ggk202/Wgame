@@ -229,7 +229,7 @@ function cycleAirlock(out) {
   G.sfx.play('hiss');
   $('#fade').classList.add('on');
   setTimeout(() => {
-    if (out) { G.ctl.deck = EXT_DECK; G.ctl.x = EXT.hatch.x + (Math.random() - 0.5) * 0.6; G.ctl.z = EXT.hatch.z - 1.6; G.ctl.yaw = 0; }
+    if (out) { G.ctl.deck = EXT_DECK; G.ctl.x = EXT.hatch.x + (Math.random() - 0.5) * 0.6; G.ctl.z = EXT.hatch.z + 1.8; G.ctl.yaw = Math.PI; }
     else { const p = polar(AIRLOCK.a, ROOM_R - 1.6); G.ctl.deck = AIRLOCK.deck; G.ctl.x = p.x; G.ctl.z = p.z; G.ctl.yaw = Math.atan2(p.x, p.z); }
     G.ctl.pitch = 0;
     pushMyPos(true);

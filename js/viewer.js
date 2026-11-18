@@ -10,9 +10,9 @@ renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x070b10);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
-scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x303028, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(5, 8, 6); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
+scene.add(new THREE.HemisphereLight(0xeef2ff, 0x3a3a34, 0.9));
+const sun = new THREE.DirectionalLight(0xfff6e8, 2.2); sun.position.set(5, 8, 6); scene.add(sun);
 const grid = new THREE.GridHelper(40, 40, 0x2a4058, 0x16222e); scene.add(grid);
 
 // ---------- catalogue ----------
@@ -64,7 +64,7 @@ function show(it) {
     info = `<h2>${c.name}</h2><dl><dt>Location</dt><dd>${it.sub}</dd><dt>Console</dt><dd>${c.panel || (c.ext ? 'none: inspect on EVA, repair by hand or drone' : '—')}</dd><dt>Base power</dt><dd>${c.power} MW · priority ${c.prio}</dd><dt>Wear</dt><dd>${c.wear} %/min</dd><dt>Footprint</dt><dd>${(c.fp * 2).toFixed(1)} m</dd>${c.computer ? '<dt>Type</dt><dd>Computer: can suffer software faults</dd>' : ''}</dl>`;
   } else if (it.kind === 'avatar') {
     const a = buildAvatar('#ff8c42');
-    a.helmet.visible = !!it.suit; a.pack.visible = !!it.suit; a.item.visible = false;
+    a.setSuit(!!it.suit); a.item.visible = false;
     root.add(a.group);
     info = `<h2>${it.name}</h2><p>Players are seen like this by crewmates. Colour comes from the lobby choice. Downed crew lie on the floor with a flashing name tag.</p>`;
   } else if (it.kind === 'fire') {
@@ -75,6 +75,7 @@ function show(it) {
     root.add(buildExterior(comps));
     root.children[0].userData.plume.visible = true;
     built = { comps, exterior: true };
+    for (const id of ['radA', 'radB']) comps[id].wing.scale.x = 1;
     info = `<h2>Exterior</h2><p>The pressure hull with the dorsal equipment spine on top. Crew reach it through the Cargo-deck airlock in a vacuum suit. Radiator wings, three PDC turrets, the spinal railgun, the antenna and the sensor array are all repairable by hand.</p><p class="dim">The drive plume is shown lit here.</p>`;
   } else if (it.kind === 'deck') {
     const fake = { scene: root, decks: [], comps: {} };
@@ -89,7 +90,7 @@ function show(it) {
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
   orbit.target.copy(ctr);
-  if (it.kind === 'exterior') { orbit.target.set(0, -8, 0); orbit.dist = 120; orbit.pitch = 0.5; }
+  if (it.kind === 'exterior') { orbit.target.set(0, -8, -8); orbit.dist = 175; orbit.pitch = 0.45; }
   else { orbit.dist = Math.max(2.2, Math.max(size.x, size.y, size.z) * (it.kind === 'deck' ? 1.25 : 1.9)); orbit.pitch = it.kind === 'deck' ? 0.85 : 0.35; }
   grid.visible = it.kind !== 'deck' && it.kind !== 'exterior';
   $('#info').innerHTML = info;
@@ -99,7 +100,7 @@ function show(it) {
   applyOpts();
 }
 
-const COND = { ok: [0x40ff80, 0x2ad0c0], damaged: [0xffb020, 0x2ad0c0], critical: [0xff3030, 0x902020], fault: [0xff40ff, 0x803080], dead: [0x111111, 0x050608] };
+const COND = { ok: [0x40ff80, 0xffffff], damaged: [0xffb020, 0xffffff], critical: [0xff3030, 0xff7a70], fault: [0xff40ff, 0xff60ff], dead: [0x111111, 0x050608] };
 function applyOpts() {
   if (!root) return;
   const comps = built && built.comps ? Object.values(built.comps) : built && built.light ? [built] : [];
@@ -120,11 +121,11 @@ canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId); if (!p) return;
   if (pointers.size === 1) { orbit.yaw -= (e.clientX - p.x) * 0.008; orbit.pitch = Math.max(-0.2, Math.min(1.5, orbit.pitch + (e.clientY - p.y) * 0.006)); opt.spin = false; $('#t-spin').classList.remove('sel'); }
   p.x = e.clientX; p.y = e.clientY;
-  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orbit.dist = Math.max(1, Math.min(200, (dist0 * pinch0) / d)); }
+  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orbit.dist = Math.max(1, Math.min(320, (dist0 * pinch0) / d)); }
 });
 const up = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch0 = 0; };
 canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(1, Math.min(200, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(1, Math.min(320, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
 
 function resize() {
   const r = canvas.getBoundingClientRect();

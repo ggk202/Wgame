@@ -195,6 +195,7 @@ export class HUD {
       ${me.deck === EXT_DECK ? `<div class="sl"><span>EVA</span><b class="${me.suit ? 'warn' : 'bad'}">HARD VACUUM${me.suit ? '' : ' — NO SUIT!'}${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`
         : `<div class="sl"><span>${DECKS[me.deck].name.toUpperCase()}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`}
       <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.75) ? 'bad' : ''}">${S.drive.g.toFixed(2)} g${S.drive.g < 0.05 || me.deck === EXT_DECK ? ' · MAG BOOTS' : ''}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK ? ` · tether yanks above ${EXT.maxG} g` : ''}</b></div>`;
+    document.body.classList.toggle('suited', !!me.suit && me.state === 'alive');
     // prompt
     this.prompt.innerHTML = focus ? promptFor(S, me, focus, ctx.touch) : '';
     // vignette

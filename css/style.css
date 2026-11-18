@@ -165,3 +165,8 @@ body.touch #chat { left: 50%; transform: translateX(-50%); bottom: auto; top: 30
 @media (max-height: 800px) { .hudbox { font-size: 11px; } .sl { min-height: 15px; } }
 body.touch.panel-open #touchui { display: none; }
 body.touch .pclose { padding: 10px 16px; font-size: 16px; }
+/* EVA helmet view */
+#helmet { position: fixed; inset: 0; pointer-events: none; display: none;
+  background: radial-gradient(ellipse 78% 74% at 50% 50%, transparent 72%, rgba(200,165,80,0.12) 82%, rgba(8,10,14,0.92) 100%),
+              linear-gradient(180deg, rgba(255,230,160,0.07) 0%, transparent 25%); }
+body.suited #helmet { display: block; }
