@@ -141,7 +141,7 @@ Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at th
 
 ## Repairs and parts
 
-Damaged modules develop a specific fault, chosen from the faults that module type can actually have. Press `R` at the module to open its **repair procedure**: a 3D workbench where you strip it down with a screwdriver (swappable bits), ratchet wrench (sockets), tweezers, wire cutters, insulating tape, a compact welder and a probe/multimeter. Pick a tool with `1–8`, change bit or socket with `B`, and hold the mouse (or your finger) on a part to work it.
+Damaged modules develop a specific fault, chosen from the faults that module type can actually have. Press `R` at the module to open its **repair procedure**: a 3D workbench where you strip it down with a screwdriver (swappable bits), ratchet wrench (sockets), tweezers, wire cutters, insulating tape, a compact welder and a probe/multimeter. Pick a tool with `1–8`, change bit or socket with `B`, and hold the mouse (or your finger) on a part to work it. Turn the view with a right-drag, Alt-drag, two fingers, the arrow keys or the on-screen buttons. Zoom with the wheel, a pinch or `+`/`−`, and press `0` to reset. Test ports sit outside the housings, so you can probe them with the panel shut.
 
 There are six procedures:
 

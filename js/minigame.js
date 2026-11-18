@@ -182,7 +182,7 @@ export class RepairGame {
     const el = (this.el = document.createElement('div'));
     el.id = 'repair';
     el.innerHTML = `<div class="rg-win"><div class="rg-head"><b class="rg-title"></b><span class="rg-sub"></span><span class="rg-time"></span><button class="rg-x" title="Abandon (Esc)">✕ ABANDON</button></div>
-      <div class="rg-main"><div class="rg-view"><canvas></canvas><div class="rg-msg"></div><div class="rg-prog"><i></i></div></div>
+      <div class="rg-main"><div class="rg-view"><canvas></canvas><div class="rg-cam"><button data-c="l" title="Turn left (←)">⟲</button><button data-c="u" title="Tilt up (↑)">▲</button><button data-c="d" title="Tilt down (↓)">▼</button><button data-c="r" title="Turn right (→)">⟳</button><button data-c="i" title="Zoom in (+)">＋</button><button data-c="o" title="Zoom out (−)">－</button><button data-c="0" title="Reset view (0)">⌂</button></div><div class="rg-camhint">Right-drag or two fingers: turn the view · wheel: zoom</div><div class="rg-msg"></div><div class="rg-prog"><i></i></div></div>
       <div class="rg-side"><div class="rg-h">TOOLS</div><div class="rg-tools"></div><div class="rg-sizes"></div><div class="rg-h">PARTS FROM STORES</div><div class="rg-parts"></div><div class="rg-h">PROCEDURE</div><ol class="rg-steps"></ol></div></div></div>`;
     document.body.appendChild(el);
     this.canvas = el.querySelector('canvas');
@@ -191,9 +191,23 @@ export class RepairGame {
     const tb = el.querySelector('.rg-tools');
     this.toolBtns = TOOLS.map((t) => { const b = document.createElement('button'); b.className = 'rg-tool'; b.innerHTML = `<kbd>${t.key}</kbd> ${t.name}`; b.onclick = () => this.selectTool(t.id); tb.appendChild(b); return b; });
     this.sizesEl = el.querySelector('.rg-sizes'); this.partsEl = el.querySelector('.rg-parts'); this.stepsEl = el.querySelector('.rg-steps');
-    this.canvas.addEventListener('pointermove', (e) => this.onMove(e));
-    this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
-    window.addEventListener('pointerup', () => this.onUp());
+    // view: right-drag (or Alt/two-finger drag) turns the camera round the bench, the wheel or a pinch zooms
+    this.view = { yaw: 0, pitch: 0.03, dist: 1.28 };
+    const touches = new Map(); let orbit = null, pinch = 0;
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+      if (touches.size === 2) { const [a, b] = [...touches.values()], c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (orbit) this.turnView((c[0] - orbit[0]) * 0.006, (c[1] - orbit[1]) * 0.006); if (pinch) this.zoomView(pinch / d); orbit = c; pinch = d; return; }
+      if (orbit && touches.size < 2) { this.turnView((e.clientX - orbit[0]) * 0.006, (e.clientY - orbit[1]) * 0.006); orbit = [e.clientX, e.clientY]; return; }
+      this.onMove(e);
+    });
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { this.action = null; orbit = null; pinch = 0; return; } }
+      if (e.button === 2 || e.button === 1 || e.altKey) { orbit = [e.clientX, e.clientY]; this.canvas.setPointerCapture(e.pointerId); return; }
+      this.onDown(e);
+    });
+    window.addEventListener('pointerup', (e) => { touches.delete(e.pointerId); if (touches.size < 2) pinch = 0; if (orbit && touches.size === 0) { orbit = null; return; } this.onUp(); });
+    this.canvas.addEventListener('wheel', (e) => { if (!this.open) return; e.preventDefault(); this.zoomView(e.deltaY > 0 ? 1.1 : 1 / 1.1); }, { passive: false });
+    el.querySelectorAll('.rg-cam button').forEach((b) => (b.onclick = () => this.camKey(b.dataset.c)));
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
   init() {
@@ -231,7 +245,7 @@ export class RepairGame {
     this.diff = S.settings.difficulty;
     this.speed = { recruit: 0.6, spacer: 0.8, veteran: 1, newtonian: 1.25 }[this.diff] || 1;
     this.hints = this.diff === 'recruit' || this.diff === 'spacer';
-    this.used = {}; this.stage = 0; this.errors = 0; this.elapsed = 0; this.action = null; this.tool = 'hand'; this.part = null; this.bit = 'PH2'; this.socket = '13';
+    this.used = {}; this.stage = 0; this.errors = 0; this.elapsed = 0; this.view = { yaw: 0, pitch: 0.03, dist: 1.28 }; this.action = null; this.tool = 'hand'; this.part = null; this.bit = 'PH2'; this.socket = '13';
     this.el.querySelector('.rg-title').textContent = `${COMPS[id].name.toUpperCase()} — ${need.issues.map((i) => i.label.toUpperCase()).join(' + ')}`;
     this.buildStage();
     this.el.style.display = 'flex'; this.open = true;
@@ -326,8 +340,9 @@ export class RepairGame {
     this.step('Screw it shut', () => st.panelBack && st.screws.every((s) => s.in));
   }
   testPort(x, y, z = 0.01, label = 'TEST') {
-    const m = mgMats(), st = this.st, g = new THREE.Group(); g.position.set(x, y, z); this.bench.add(g);
+    const m = mgMats(), st = this.st, g = new THREE.Group(); g.position.set(x, y, z); g.scale.setScalar(2.2); this.bench.add(g);
     const plate = mgBox(0.07, 0.05, 0.006, m.dark); g.add(plate);
+    const bezel = mgBox(0.078, 0.058, 0.004, m.yellow); bezel.position.z = -0.004; g.add(bezel);
     for (const [dx, mm] of [[-0.015, m.red], [0.015, m.blackOx]]) { const j = mgCyl(0.006, 0.006, 0.01, mm, 12); j.rotation.x = Math.PI / 2; j.position.set(dx, -0.004, 0.006); g.add(j); }
     const led = new THREE.Mesh(new THREE.SphereGeometry(0.004, 10, 8), new THREE.MeshBasicMaterial({ color: 0x401010 })); led.position.set(0, 0.016, 0.005); g.add(led);
     const lab = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.012), new THREE.MeshBasicMaterial({ map: mgLabel(label, '#fff', '#2b2f35') })); lab.position.set(0, 0.033, 0.004); g.add(lab);
@@ -394,7 +409,7 @@ export class RepairGame {
         durFor: () => (wv.state === 'cut' ? 1.8 : 0.8),
       });
     }
-    this.testPort(0.36, 0.17, -0.12);
+    this.testPort(0.3, -0.41, 0.02);
     st.closeReady = () => cards.every((c) => c.state === 'ok') && wires.every((w2) => w2.state === 'taped');
     st.testReady = () => st.panelBack && st.screws.every((s) => s.in);
     if (f.bad) { this.step(`Pull the scorched card${f.bad > 1 ? 's' : ''} (tweezers)`, () => cards.every((c) => !c.bad || c.state !== 'bad')); this.step(`Fit ${f.bad} spare card${f.bad > 1 ? 's' : ''} from stores`, () => cards.every((c) => c.state === 'ok')); }
@@ -408,7 +423,7 @@ export class RepairGame {
   buildCoolant(f) {
     const m = mgMats(), st = this.st;
     // a pipe run with an isolation valve (handwheel) and a bolted flange joint, angled so the flange face shows
-    const bench0 = this.bench; const asm = new THREE.Group(); asm.rotation.y = -0.5; asm.position.set(0.05, 0, 0.1); bench0.add(asm); this.bench = asm;
+    const bench0 = this.bench; const asm = new THREE.Group(); asm.rotation.y = -0.55; asm.position.set(0.02, 0, 0.12); bench0.add(asm); this.bench = asm;
     const pipe = mgCyl(0.045, 0.045, 1.15, m.steel, 24); pipe.rotation.z = Math.PI / 2; pipe.position.set(0, -0.02, -0.12); this.bench.add(pipe);
     for (const x of [-0.52, 0.52]) { const cl = mgBox(0.04, 0.2, 0.1, m.dark); cl.position.set(x, -0.08, -0.16); this.bench.add(cl); }
     const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.035), new THREE.MeshBasicMaterial({ map: mgLabel('COOLANT · 6 bar', '#111', '#4ad0e6') })); tag.position.set(-0.3, 0.27, -0.12); this.bench.add(tag);
@@ -479,7 +494,7 @@ export class RepairGame {
       done: () => { if (st.gasket !== 'gone') { st.gasket = 'gone'; ghost(gasket, true); crack.visible = false; } else { st.sealIn = true; ghost(gasket, false); gasket.material = m.gasket; this.use('seal'); } this.host.sfx && this.host.sfx.click(0.3); },
     });
     st.gasket = 'old';
-    this.testPort(0.5, 0.2, -0.08, 'P-TEST');
+    this.testPort(0.58, 0.3, 0.06, 'P-TEST');
     st.testReady = () => st.valve === 'reopened';
     this.step('Close the isolation valve', () => st.valve !== 'open');
     this.step(`Undo the ${nb} flange bolts${this.sizesKnown() ? '' : ' (check the socket size)'}`, () => bolts.every((b) => b.state === 'out') || st.reassembling);
@@ -527,7 +542,7 @@ export class RepairGame {
       label: () => (st.br === 'old' ? 'Draw off the seized bearing' : 'Press on a new bearing'),
       anim: (k) => { bearing.position.z = st.br === 'old' ? -0.06 + k * 0.12 : 0.06 - k * 0.12; bearing.rotation.z += 0.05; },
       done: () => { if (st.br === 'old') { st.br = 'gone'; ghost(bearing, true); } else { st.br = 'new'; ghost(bearing, false); rust.visible = false; bearing.position.z = -0.06; rust.visible = false; this.use('bearing'); } this.host.sfx && this.host.sfx.noise(0.3, 0.15, 1400); } });
-    const tp = this.testPort(0.27, 0.17, -0.1, 'RUN');
+    const tp = this.testPort(0.25, -0.37, 0.02, 'RUN');
     st.closeReady = () => st.br === 'new' && st.plateOn && bolts.every((b) => b.state === 'tight');
     st.testReady = () => st.panelBack && st.screws.every((s) => s.in);
     this.step(`Undo the retaining bolts${this.sizesKnown() ? '' : ' (check the socket)'}`, () => bolts.every((b) => b.state === 'out') || st.br !== 'old');
@@ -587,7 +602,7 @@ export class RepairGame {
         anim: (k) => { fuse.position.z = c.state === 'blown' ? k * 0.08 : 0.08 - k * 0.08; },
         done: () => { if (c.state === 'blown') { c.state = 'gone'; ghost(fuse, true); } else { c.state = 'ok'; ghost(fuse, false); fuse.position.z = 0; body.material = m.glass; this.use('cell'); } this.host.sfx && this.host.sfx.click(0.35, 0, 2000); } });
     }
-    this.testPort(0.3, 0.2, -0.12, 'HV TEST');
+    this.testPort(0.3, -0.41, 0.03, 'HV TEST');
     st.closeReady = () => cells.every((c) => c.state === 'ok');
     st.closedAll = () => st.panelBack && st.screws.every((s) => s.in);
     st.testReady = () => st.breaker === 'restored';
@@ -702,8 +717,18 @@ export class RepairGame {
       if (id === 'driver') this.tools.driver.userData.setBit(this.bit);
     } else this.sizesEl.innerHTML = '';
   }
+  turnView(dx, dy) { const v = this.view; v.yaw = Math.max(-1.25, Math.min(1.25, v.yaw - dx)); v.pitch = Math.max(-0.9, Math.min(0.95, v.pitch + dy)); }
+  zoomView(k) { this.view.dist = Math.max(0.55, Math.min(2.0, this.view.dist * k)); }
+  camKey(c) { if (c === 'l') this.turnView(-0.25, 0); else if (c === 'r') this.turnView(0.25, 0); else if (c === 'u') this.turnView(0, -0.2); else if (c === 'd') this.turnView(0, 0.2); else if (c === 'i') this.zoomView(0.85); else if (c === 'o') this.zoomView(1.18); else if (c === '0') Object.assign(this.view, { yaw: 0, pitch: 0.03, dist: 1.28 }); }
+  placeCam() {
+    const v = this.view, t = new THREE.Vector3(0, 0, -0.06);
+    this.cam.position.set(Math.sin(v.yaw) * Math.cos(v.pitch) * v.dist, Math.sin(v.pitch) * v.dist, Math.cos(v.yaw) * Math.cos(v.pitch) * v.dist).add(t);
+    this.cam.lookAt(t);
+  }
   key(k) {
     if (!this.open) return false;
+    const ck = { arrowleft: 'l', arrowright: 'r', arrowup: 'u', arrowdown: 'd', '+': 'i', '=': 'i', '-': 'o', '0': '0' }[k];
+    if (ck) { this.camKey(ck); return true; }
     if (k === 'escape') { this.close(true); return true; }
     const t = TOOLS.find((x) => x.key === k);
     if (t) { this.selectTool(t.id); return true; }
@@ -832,6 +857,7 @@ export class RepairGame {
       else { this.host.act('repair.complete', { id: this.id, key: this.jobKey }); this.host.sfx && this.host.sfx.play('chime'); this.close(false); }
       return;
     }
+    this.placeCam();
     this.renderer.render(this.scene, this.cam);
   }
 }

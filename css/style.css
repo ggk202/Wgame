@@ -386,3 +386,7 @@ body.touch #tut { top: calc(36px + env(safe-area-inset-top)); }
 #tablet .tb-screw::after { content: ''; position: absolute; left: 2px; right: 2px; top: 5px; height: 2px; background: #2a2c26; transform: rotate(35deg); }
 #tablet .s1 { left: 12px; top: 12px; } #tablet .s2 { right: 12px; top: 12px; } #tablet .s3 { left: 12px; bottom: 12px; } #tablet .s4 { right: 12px; bottom: 12px; }
 @media (max-width: 760px) { #tablet .tb-screen { flex-direction: column; } #tablet canvas { width: 100%; } #tablet .tb-info { max-height: 30vh; } }
+#repair .rg-cam { position: absolute; right: 10px; top: 10px; display: grid; grid-template-columns: repeat(4, 34px); gap: 4px; }
+#repair .rg-cam button { font: inherit; font-size: 16px; height: 34px; background: rgba(20, 8, 0, 0.75); color: #ffc27a; border: 1px solid #a8581a; cursor: pointer; padding: 0; }
+#repair .rg-cam button:hover { background: #ff8a1e; color: #140800; }
+#repair .rg-camhint { position: absolute; left: 10px; top: 10px; font-size: 11px; color: #a8581a; pointer-events: none; }
