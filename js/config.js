@@ -117,6 +117,7 @@ export const ITEMS = {
   ext:       { name: 'Extinguisher', color: 0xe03030, short: 'EXTING.' },
   medkit:    { name: 'Medkit', color: 0xf5f5f5, short: 'MEDKIT' },
   cartridge: { name: 'Scrubber Cartridge', color: 0x50c8a0, short: 'CARTRIDGE' },
+  tablet:    { name: 'Maintenance Tablet', color: 0x3a4a3a, short: 'TABLET' },
 };
 
 export const RECIPES = {

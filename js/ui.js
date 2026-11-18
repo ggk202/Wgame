@@ -381,5 +381,6 @@ function promptFor(S, me, f, touch) {
     if (it && it.type === 'medkit') parts.push(K('F', p.state === 'downed' ? 'Revive' : 'Treat'));
   }
   if (it && f.kind !== 'item') parts.push(K('G', 'Drop item'));
+  if (it && it.type === 'tablet') parts.push(K('F', 'Tablet'));
   return parts.join(' · ');
 }

@@ -15,6 +15,7 @@ import { ExtView } from './extview.js';
 import { sasModes } from './attitude.js';
 import { Tutorial } from './tutorial.js';
 import { RepairGame, fmtClock } from './minigame.js';
+import { Tablet } from './tablet.js';
 import { repairNeeds, missingParts, PARTS, MODULES, PROCS } from './repair.js';
 import { ENEMY_TYPES } from './combat.js';
 import { podState } from './crew.js';
@@ -201,6 +202,7 @@ function enterGame() {
   $('#game').style.display = 'block';
   if (!G.world) {
     G.cams = new CamView();
+    G.tablet = new Tablet({ S: () => G.S, me: () => meView(), sfx: G.sfx, onClose: () => {} });
     G.repair = new RepairGame({ S: () => G.S, act, sfx: G.sfx, toast: (t, k) => G.hud.toast(t, k), me: () => meView(), onClose: () => {} });
     G.world = new World($('#view'));
     G.world.screenInfo = screenInfo;
@@ -210,7 +212,7 @@ function enterGame() {
     G.panel = new PanelView($('#panel'), panelCtx());
     G.touchMode = isTouchDevice();
     G.ctl.bindPointer($('#view'), {
-      uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen || (G.repair && G.repair.open) || $('#help').style.display !== 'none',
+      uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen || (G.repair && G.repair.open) || (G.tablet && G.tablet.open) || $('#help').style.display !== 'none',
       key: onKey, keyUp: onKeyUp,
       mouseSeen: () => setInputMode('mouse'), keyboardSeen: () => { if (G.touch) setInputMode('mouse'); },
       lockChange: (on) => { if (on) setInputMode('mouse'); },
@@ -331,6 +333,7 @@ const PILOT_KEYS = 'wasdqeijkluox';
 function onKey(k, e) {
   if (G.chatOpen) return true;
   if (G.repair && G.repair.open) return G.repair.key(k);
+  if (G.tablet && G.tablet.open) return G.tablet.key(k);
   const me0 = G.S && G.S.players[G.myId];
   if (me0 && me0.sleep && me0.state === 'alive' && (k === 'e' || k === ' ')) { act('wake'); return true; }
   if (me0 && (me0.state === 'dead' || me0.state === 'spectator') && !G.panel.open) {
@@ -370,7 +373,7 @@ function lockMouse() {
 function handleInteraction(dt) {
   const S = G.S, me = meView();
   if (!me) return;
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive' || (G.repair && G.repair.open);
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive' || (G.repair && G.repair.open) || (G.tablet && G.tablet.open);
   if ((me.state === 'dead' || me.state === 'spectator') && G.touch) { // touch: USE cycles the ghost job, DROP the camera
     if (input.use) { input.use = false; onKey('v'); }
     if (input.drop) { input.drop = false; if (me.ghost === 'cams') onKey(']'); }
@@ -398,6 +401,7 @@ function handleInteraction(dt) {
   }
   if (G.touch && G.touch.setFloat) G.touch.setFloat(G.ctl.fl || G.ctl.deck === EXT_DECK);
   if (me.pod && input.item && !blocked && G.workT <= 0) { input.item = false; G.workT = 0.5; act('pod.grab'); }
+  if (!me.pod && input.item && !blocked && me.item && me.item.type === 'tablet' && G.workT <= 0) { input.item = false; G.workT = 0.4; G.ctl.releaseLock(); G.tablet.show(); }
   if (input.drop && me.pod) { input.drop = false; act('pod.exit'); }
   if (input.drop) {
     input.drop = false;
@@ -427,7 +431,7 @@ function handleInteraction(dt) {
     G.touch.setLabels({
       use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : f.kind === 'bunk' ? 'SLEEP' : f.kind === 'pod' ? 'BOARD' : 'USE') : (me.pod ? 'EXIT POD' : G.panel.open ? 'CLOSE' : ''),
       repair: f && f.kind === 'comp' && S.comps[f.id].hp < 100 ? 'REPAIR' : '',
-      item: me.pod ? (podState(S).carry ? 'RELEASE' : 'GRAB') : me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : 'REPAIR') : '',
+      item: me.pod ? (podState(S).carry ? 'RELEASE' : 'GRAB') : me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : me.item.type === 'tablet' ? 'TABLET' : 'REPAIR') : '',
       drop: me.item ? 'DROP' : '',
     });
   }
@@ -472,7 +476,7 @@ function frame(tms) {
   const me = S.players[G.myId];
   // teleports (respawn) from the host
   if (me && me.tp !== G.lastTp) { G.lastTp = me.tp; G.ctl.setFrom(me); }
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || (G.repair && G.repair.open);
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || (G.repair && G.repair.open) || (G.tablet && G.tablet.open);
   G.ctl.update(dt, S, me, blocked);
   if (G.role !== 'client') {
     if (me) { me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; me.pitch = G.ctl.pitch; me.fl = G.ctl.fl; }
@@ -519,6 +523,7 @@ function frame(tms) {
   if (G.tut) G.tut.tick(rdt);
   if (G.repair && G.repair.open) { if (!me || me.state !== 'alive') G.repair.close(true); else G.repair.tick(rdt, now); }
   updateSleepFx(me, rdt);
+  if (G.tablet && G.tablet.open) G.tablet.tick(rdt, now);
   G.sfx.setConsoleHum(!!G.world.focus && G.world.focusT > 0.5);
   { let near = 0; const me2 = meView(); if (me2) for (const id in G.world.comps) { const v = G.world.comps[id]; if (v.canvas && v.wasLive && v.group.parent && v.group.parent.visible) { const p = v.group.position; if (Math.hypot(p.x - me2.x, p.z - me2.z) < 7) near++; } } G.sfx.idle(rdt, !!G.world.focus, near); }
   G.hudT -= dt;

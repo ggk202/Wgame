@@ -167,14 +167,14 @@ export function applyAction(S, pid, a, args = {}) {
       if (p.item) return err('Hands full — drop or return your item first (G)');
       const t = args.type;
       if (!ITEMS[t]) return;
-      if (a === 'locker.take' && !['ext', 'patch', 'medkit'].includes(t)) return;
+      if (a === 'locker.take' && !['ext', 'patch', 'medkit', 'tablet'].includes(t)) return;
       if (a === 'stores.take' && !nearComp(p, 'stores', 3)) return;
-      if (t !== 'ext') { if ((S.stores[t] || 0) <= 0) return err(`No ${ITEMS[t].name} in stores`); S.stores[t]--; }
+      if (t !== 'ext' && t !== 'tablet') { if ((S.stores[t] || 0) <= 0) return err(`No ${ITEMS[t].name} in stores`); S.stores[t]--; }
       p.item = { type: t, charge: 100 }; return;
     }
     case 'stores.return': {
       if (!p.item) return;
-      if (p.item.type !== 'ext' && p.item.charge >= 50) S.stores[p.item.type] = (S.stores[p.item.type] || 0) + 1;
+      if (p.item.type !== 'ext' && p.item.type !== 'tablet' && p.item.charge >= 50) S.stores[p.item.type] = (S.stores[p.item.type] || 0) + 1;
       p.item = null; return;
     }
 

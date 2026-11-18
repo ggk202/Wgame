@@ -531,7 +531,7 @@ export const PANELS = {
         { label: 'Suit', labelFn: () => (ctx.me().suit ? 'Take off vacuum suit' : 'Put on vacuum suit'), act: 'locker.suit' },
         { label: 'Refill suit O₂ & extinguisher', act: 'locker.refill' },
       ]);
-      B.html((S) => `<div class="grid2">${btn('Take extinguisher', 'locker.take', { type: 'ext' })}${btn(`Take hull patch (${S.stores.patch})`, 'locker.take', { type: 'patch' })}${btn(`Take medkit (${S.stores.medkit})`, 'locker.take', { type: 'medkit' })}${btn('Return held item', 'stores.return')}</div>`);
+      B.html((S) => `<div class="grid2">${btn('Take extinguisher', 'locker.take', { type: 'ext' })}${btn(`Take hull patch (${S.stores.patch})`, 'locker.take', { type: 'patch' })}${btn(`Take medkit (${S.stores.medkit})`, 'locker.take', { type: 'medkit' })}${btn('Take maintenance tablet', 'locker.take', { type: 'tablet' })}${btn('Return held item', 'stores.return')}</div>`);
       B.note('Suits give 5 minutes of oxygen and protect against vacuum, smoke and heat, but slow you down. Patches and medkits come from the ship-wide stores through the pneumatic tube network.');
     },
   },

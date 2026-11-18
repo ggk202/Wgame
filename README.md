@@ -136,6 +136,7 @@ Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at th
   An overheated engineering deck degrades the battery. Ship Status lists active cascades.
 - **The work pod.** A small pressurised craft in a cradle beside the EVA hatch. Board it on EVA with `E`. It flies four times harder than the jet pack and has no tether. `F` grapples and releases cargo, and `G` exits. Repairs work from 8 m. Bring back drifting salvage containers (parts and credits) and damaged drones before they drift away. Under thrust the ship leaves the pod behind.
 - **Ghost jobs.** Thawing a backup crew member takes 45 s. Meanwhile `V` switches between a free camera, a scout drone (it sharpens sensor locks and point defence while it is out) and the external camera net.
+- **Maintenance tablet.** Take one from any emergency locker and press `F`. It shows a crude phosphor-green 3D wireframe of the whole ship, with every module coloured by state (OK, damaged, critical, dead, fire, computer fault, off), crew positions and breaches. Drag to turn it, zoom with the wheel or a pinch, and tap a module for its fault, the parts it needs and what's in stores. The other pages show crew (location, health, fatigue), nav (phase, capture/rendezvous, slot, hazards, unanswered hails) and stores (parts, consumables, running experiments).
 - **All decks are drawn at once,** so you can look straight down the trunk. Under thrust, climb the trunk ladder through the hazard-striped gap in the railing.
 
 ## Repairs and parts
