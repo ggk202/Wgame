@@ -22,6 +22,10 @@ The ship and crew follow an ISS-era, NASA-style look. It's built entirely from p
 * **Interior:** off-white equipment racks with placards, ISS-yellow handrails, strapped stowage bags, cable trays, laptop workstations and blue crew seats.
 * **Crew:** casual crew wear a polo in their player colour. Suited crew wear a white EMU-style spacesuit with a life-support backpack, chest control module, gold sun visor, helmet lights and colour-coded identification stripes. In first person, a helmet frame appears while suited.
 
+## Consoles
+
+Every screen on the ship is live, showing its system's readouts in a retro amber/orange phosphor style. Pressing **E** on a console flies the camera square onto its screen and releases the mouse, so you use the full interface directly on that screen. Leave with the **EXIT CONSOLE** button below it, `Esc` or `E`. Lockers, the lift and the Tab status view open as free-standing terminals in the same style.
+
 ## The ship
 
 | Deck | Systems |

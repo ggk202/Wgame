@@ -8,7 +8,48 @@ import { PAL, mat, emis, texMat, mliTex, rackTex, floorTex, textSprite, planeLab
 export { textSprite, buildComp, buildFire, buildAvatar, buildExterior };
 
 const SEG = 16;
-const SCREEN_OK = 0xffffff;
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+// ---------- live console screens: retro amber/orange phosphor ----------
+const AMB = '#ff8a1e', AMB_D = '#a8581a', AMB_B = '#ffc27a', SRED = '#ff3b2f', SYEL = '#ffd23f', SBG = '#0a0400';
+function drawScreen(cv, info, st, now) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const F = (sz, b = '') => `${b}${sz}px "Share Tech Mono", ui-monospace, Menlo, monospace`;
+  g.shadowBlur = 0; g.fillStyle = SBG; g.fillRect(0, 0, W, H);
+  if (st === 'off') { g.fillStyle = '#1c0b02'; g.font = F(20, 'bold '); g.textAlign = 'center'; g.fillText('— NO POWER —', W / 2, H / 2); g.textAlign = 'left'; return; }
+  if (st === 'dead') {
+    for (let i = 0; i < 600; i++) { g.fillStyle = `rgba(255,${(120 + Math.random() * 90) | 0},40,${Math.random() * 0.4})`; g.fillRect(Math.random() * W, Math.random() * H, 3, 2); }
+    g.fillStyle = SRED; g.font = F(22, 'bold '); g.textAlign = 'center'; g.fillText('// SIGNAL LOST //', W / 2, H / 2); g.textAlign = 'left'; return;
+  }
+  const fs = Math.max(14, Math.round(W / 21)), hh = fs + 10;
+  g.fillStyle = AMB; g.fillRect(0, 0, W, hh);
+  g.save(); g.beginPath(); g.rect(W - 90, 0, 90, hh); g.clip(); g.fillStyle = SBG;
+  for (let x = W - 110; x < W + 20; x += 16) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 8, 0); g.lineTo(x - 2, hh); g.lineTo(x - 10, hh); g.fill(); }
+  g.restore();
+  g.fillStyle = SBG; g.font = F(fs, 'bold '); g.fillText(String(info.title || '').slice(0, 24), 8, fs + 2);
+  g.shadowColor = AMB; g.shadowBlur = 6;
+  let y = hh + fs + 6; const lh = fs + 5;
+  for (const [lab, val, c] of info.lines || []) {
+    if (y > H - 4) break;
+    g.font = F(fs - 1); g.fillStyle = AMB_D; g.fillText(lab, 8, y);
+    g.fillStyle = c === 'bad' ? SRED : c === 'warn' ? SYEL : AMB_B; g.textAlign = 'right'; g.fillText(String(val), W - 8, y); g.textAlign = 'left';
+    y += lh;
+  }
+  for (const [lab, v, c] of info.bars || []) {
+    if (y + fs > H) break;
+    g.font = F(fs - 2); g.fillStyle = AMB_D; g.fillText(lab, 8, y); y += 5;
+    const n = 24, bw = (W - 16) / n, on = Math.round(clamp01(v) * n);
+    for (let i = 0; i < n; i++) { g.fillStyle = i < on ? (c === 'bad' ? SRED : c === 'warn' ? SYEL : AMB) : '#2a1204'; g.fillRect(8 + i * bw, y, bw - 2, fs * 0.6); }
+    y += fs * 0.6 + lh * 0.7;
+  }
+  const banner = (col, text) => { g.shadowBlur = 0; g.fillStyle = col; g.fillRect(0, H / 2 - fs, W, fs * 2); g.fillStyle = SBG; g.font = F(fs, 'bold '); g.textAlign = 'center'; g.fillText(text, W / 2, H / 2 + fs * 0.35); g.textAlign = 'left'; };
+  if (st === 'fault' && Math.sin(now * 6) > 0) banner(SRED, 'SOFTWARE FAULT // REBOOT');
+  if (st === 'fire') banner(Math.sin(now * 8) > 0 ? SRED : SYEL, '!! FIRE !!');
+  g.shadowBlur = 0; g.fillStyle = 'rgba(0,0,0,0.3)';
+  for (let yy = 0; yy < H; yy += 3) g.fillRect(0, yy, W, 1);
+  const gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.75);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.6)'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+}
 
 export class World {
   constructor(canvas) {
@@ -43,6 +84,9 @@ export class World {
     this.scene.add(this.exterior);
     this.decks.push(this.exterior);
     this.buildHandItem();
+    this.setupScreens();
+    this.screenInfo = null; // set by the game: (S, compId) => { title, lines, bars }
+    this.scrT = 0; this.focus = null; this.focusT = 0; this.focusDir = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -206,6 +250,67 @@ export class World {
     this.scene.add(g);
     this.decks.push(g);
   }
+  setupScreens() {
+    for (const id in this.comps) {
+      const v = this.comps[id];
+      if (!v.screen) continue;
+      const p = v.screen.geometry.parameters;
+      const W = 400, H = Math.max(120, Math.round(W / (p.width / p.height)));
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+      v.screen.material.map = tex; v.screen.material.color.setHex(0xffffff); v.screen.material.needsUpdate = true;
+      v.canvas = cv; v.tex = tex;
+      drawScreen(cv, { title: COMPS[id].name.toUpperCase(), lines: [['BOOT', 'OK']] }, 'ok', 0);
+    }
+  }
+  drawScreens(S, me, now) {
+    for (const id in this.comps) {
+      const v = this.comps[id];
+      if (!v.canvas || compDeck(id) !== me.deck || id === this.focus) continue;
+      const p = v.group.position;
+      if (Math.hypot(p.x - me.x, p.z - me.z) > 16) continue;
+      const c = S.comps[id];
+      const st = c.hp <= 0 ? 'dead' : !c.on || c.pw <= 0 ? 'off' : c.fire > 0 ? 'fire' : COMPS[id].computer && c.fault ? 'fault' : 'ok';
+      let info;
+      try { info = this.screenInfo ? this.screenInfo(S, id) : null; } catch (e) { info = null; }
+      drawScreen(v.canvas, info || { title: COMPS[id].name.toUpperCase(), bars: [['INTEGRITY', c.hp / 100, '']] }, st, now);
+      v.tex.needsUpdate = true;
+    }
+  }
+  // ---------- console focus: fly the camera square onto a screen ----------
+  setFocus(id) {
+    if (id && this.comps[id] && this.comps[id].screen) { this.focus = id; this.focusDir = 1; }
+    else if (this.focus) this.focusDir = -1;
+  }
+  focusPose(mesh) {
+    mesh.updateWorldMatrix(true, false);
+    const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    mesh.matrixWorld.decompose(pos, q, sc);
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q), up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+    const p = mesh.geometry.parameters, sw = p.width * sc.x, sh = p.height * sc.y;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const targetH = Math.min((vh - 150) * 0.95, (vw * 0.9) / (sw / sh));
+    const tanH = Math.tan((this.camera.fov * Math.PI) / 360);
+    const d = (sh * vh) / (2 * tanH * targetH);
+    const shift = (34 / vh) * 2 * d * tanH; // lift the screen up a little to leave room for the exit button
+    const target = pos.clone().addScaledVector(up, -shift);
+    const eye = target.clone().addScaledVector(normal, d);
+    const m = new THREE.Matrix4().lookAt(eye, target, up);
+    return { pos: eye, quat: new THREE.Quaternion().setFromRotationMatrix(m) };
+  }
+  focusRect() {
+    if (!this.focus || this.focusT < 0.05) return null;
+    const mesh = this.comps[this.focus].screen;
+    const p = mesh.geometry.parameters, w = p.width / 2, h = p.height / 2;
+    this.camera.updateMatrixWorld();
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const [x, y] of [[-w, -h], [w, -h], [w, h], [-w, h]]) {
+      const v = new THREE.Vector3(x, y, 0).applyMatrix4(mesh.matrixWorld).project(this.camera);
+      const sx = (v.x * 0.5 + 0.5) * window.innerWidth, sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+      x0 = Math.min(x0, sx); y0 = Math.min(y0, sy); x1 = Math.max(x1, sx); y1 = Math.max(y1, sy);
+    }
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, t: this.focusT };
+  }
   buildHandItem() {
     this.hand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
     this.hand.position.set(0.24, -0.22, -0.6);
@@ -230,6 +335,18 @@ export class World {
       const s = this.shake * 0.08;
       this.camera.position.x += (Math.random() - 0.5) * s; this.camera.position.y += (Math.random() - 0.5) * s;
       this.camera.rotation.z += (Math.random() - 0.5) * s * 0.5;
+    }
+    const prevNow = this._fnow; this._fnow = now;
+    if (this.focus) {
+      const fdt = Math.min(0.12, Math.max(dt, now - (prevNow || now)));
+      this.focusT = clamp01(this.focusT + (this.focusDir * fdt) / 0.45);
+      if (this.focusT <= 0 && this.focusDir < 0) { this.focus = null; this.focusDir = 0; }
+      else {
+        const t = this.focusT, e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        const pose = this.focusPose(this.comps[this.focus].screen);
+        this.camera.position.lerp(pose.pos, e);
+        this.camera.quaternion.slerp(pose.quat, e);
+      }
     }
     this.point.position.set(0, baseY + ROOM_H - 0.4, 0);
     this.point2.position.set(-Math.sin(me.yaw) * 4, baseY + ROOM_H - 0.5, -Math.cos(me.yaw) * 4);
@@ -279,10 +396,6 @@ export class World {
       const hp = c.hp;
       const col = hp <= 0 ? 0x111111 : c.fire > 0 ? (Math.sin(now * 12) > 0 ? 0xff3010 : 0x401000) : c.fault ? 0xff40ff : hp < 25 ? 0xff3030 : hp < 60 ? 0xffb020 : 0x40ff80;
       v.light.material.color.setHex(col);
-      if (v.screen) {
-        const off = hp <= 0 || c.pw <= 0 || !c.on;
-        v.screen.material.color.setHex(off ? 0x050608 : c.fault ? (Math.sin(now * 6) > 0 ? 0xff60ff : 0x401040) : hp < 25 ? 0xff7a70 : SCREEN_OK);
-      }
       if (!v.fire) continue;
       v.fire.visible = c.fire > 0.02;
       if (v.fire.visible) {
@@ -307,10 +420,12 @@ export class World {
     if (this.comps.cryo && deck === 3) this.comps.cryo.group.children.forEach((ch) => { if (ch.userData.pod !== undefined) ch.material.color.setHex(ch.userData.pod < S.pods ? 0x4aa0d8 : 0x101418); });
     if (this.comps.dronebay && deck === 1) { const busy = S.drones.jobs.length; this.comps.dronebay.group.children.forEach((ch) => { if (ch.userData.drone !== undefined) { ch.visible = ch.userData.drone >= busy; ch.position.y = 0.4 + 0.05 * Math.sin(now * 2 + ch.userData.drone); } }); }
 
+    this.scrT -= dt;
+    if (this.scrT <= 0) { this.scrT = 0.5; this.drawScreens(S, me, now); }
     this.updateBreaches(S, deck, now);
     this.updateItems(S, deck);
     this.updateAvatars(S, me, deck, dt, now);
-    if (me.item) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
+    if (me.item && !this.focus) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
     else this.hand.visible = false;
   }
   updateExterior(S, now, dt) {

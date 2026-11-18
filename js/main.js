@@ -8,7 +8,7 @@ import { World } from './world.js';
 import { Controller, input, prefs, savePrefs } from './player.js';
 import { isTouchDevice, setupTouch } from './touch.js';
 import { HUD, PanelView, $, esc } from './ui.js';
-import { PANELS } from './panels.js';
+import { PANELS, screenInfo } from './panels.js';
 import { HostNet, ClientNet, makeCode } from './net.js';
 import { Sfx } from './audio.js';
 
@@ -150,6 +150,7 @@ function enterGame() {
   $('#game').style.display = 'block';
   if (!G.world) {
     G.world = new World($('#view'));
+    G.world.screenInfo = screenInfo;
     G.hud = new HUD($('#hud'));
     G.panel = new PanelView($('#panel'), panelCtx());
     G.touchMode = isTouchDevice();
@@ -208,7 +209,9 @@ function logLocal(text, kind = 'info') { if (G.hud) G.hud.addLog(text, kind); }
 function openPanel(kind, compId) {
   const def = PANELS[kind];
   if (!def) return;
-  G.panel.show(def, compId || null);
+  const onScreen = compId && G.world.comps[compId] && G.world.comps[compId].screen;
+  G.panel.show(def, compId || null, onScreen ? 'screen' : 'overlay');
+  if (onScreen) G.world.setFocus(compId);
   G.panelKind = kind; G.panelComp = compId || null;
   document.body.classList.add('panel-open');
   if (compId) act('seat', { id: compId });
@@ -218,6 +221,7 @@ function openPanel(kind, compId) {
 function closePanel() {
   if (!G.panel.open) return;
   G.panel.hide();
+  G.world.setFocus(null);
   document.body.classList.remove('panel-open');
   if (G.panelComp) act('seat', { id: null });
   G.panelKind = null; G.panelComp = null;
@@ -282,7 +286,7 @@ function lockMouse() {
 function handleInteraction(dt) {
   const S = G.S, me = meView();
   if (!me) return;
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || me.state !== 'alive';
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive';
   G.focus = blocked ? null : G.ctl.focus(S, me);
   const f = G.focus;
   if (input.use) {
@@ -360,7 +364,7 @@ function frame(tms) {
   const me = S.players[G.myId];
   // teleports (respawn) from the host
   if (me && me.tp !== G.lastTp) { G.lastTp = me.tp; G.ctl.setFrom(me); }
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting;
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus;
   G.ctl.update(dt, S, me, blocked);
   if (G.role !== 'client') {
     if (me) { me.x = G.ctl.x; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; }
@@ -385,6 +389,8 @@ function frame(tms) {
   if (G.panel.open && me && me.state !== 'alive' && G.panelKind !== 'status' && G.panelKind !== 'debug') closePanel();
   G.world.update(S, meView(), dt, now);
   G.world.render();
+  if (G.panel.open) G.panel.place(G.world.focusRect());
+  document.body.classList.toggle('focused', !!G.world.focus);
   G.sfx.tick(dt, S.alert);
   G.hudT -= dt;
   if (G.hudT <= 0) { G.hudT = 0.1; G.hud.update(S, meView(), G.focus, { act, touch: G.touchMode }); }

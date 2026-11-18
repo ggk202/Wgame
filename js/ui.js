@@ -94,11 +94,40 @@ export class Builder {
 export class PanelView {
   constructor(root, ctx) {
     this.root = root; this.ctx = ctx; this.open = false; this.builder = null; this.compId = null;
-    root.innerHTML = `<div class="phead"><span class="ptitle"></span><span class="pstat"></span><button class="btn pclose">✕</button></div><div class="pbody"></div>`;
+    root.innerHTML = `<div class="phead"><span class="ptitle"></span><span class="pstat"></span></div><div class="pbody"></div><div class="pscan"></div>`;
     this.title = root.querySelector('.ptitle'); this.stat = root.querySelector('.pstat'); this.body = root.querySelector('.pbody');
-    root.querySelector('.pclose').onclick = () => ctx.closePanel();
+    const ex = (this.exit = document.createElement('button'));
+    ex.id = 'panel-exit'; ex.innerHTML = '◀ EXIT CONSOLE <kbd>ESC</kbd>';
+    ex.onclick = () => { ctx.click(); ctx.closePanel(); };
+    document.body.appendChild(ex);
   }
-  show(def, compId) {
+  // Screen mode: the panel is pinned onto the projected rectangle of the in-world screen.
+  // Overlay mode (lockers, lift, status board via Tab): a free-standing terminal in the middle of the view.
+  place(rect) {
+    if (!this.open) return;
+    const LW = 600;
+    if (this.mode === 'screen') {
+      if (!rect || rect.w < 40) { this.root.style.opacity = 0; this.exit.style.display = 'none'; return; }
+      const scale = rect.w / LW;
+      this.root.style.width = LW + 'px';
+      this.root.style.height = Math.max(120, rect.h / scale) + 'px';
+      this.root.style.transform = `translate(${rect.x}px, ${rect.y}px) scale(${scale})`;
+      this.root.style.opacity = Math.max(0, (rect.t - 0.4) / 0.6);
+      this.root.style.pointerEvents = rect.t > 0.9 ? 'auto' : 'none';
+      this.exit.style.display = rect.t > 0.6 ? 'block' : 'none';
+      this.exit.style.left = rect.x + rect.w / 2 + 'px';
+      this.exit.style.top = Math.min(window.innerHeight - 52, rect.y + rect.h + 14) + 'px';
+    } else {
+      const r = this.root.getBoundingClientRect();
+      this.exit.style.display = 'block';
+      this.exit.style.left = r.left + r.width / 2 + 'px';
+      this.exit.style.top = Math.min(window.innerHeight - 52, r.bottom + 12) + 'px';
+    }
+  }
+  show(def, compId, mode = 'overlay') {
+    this.mode = mode;
+    this.root.className = 'pv-' + mode;
+    this.root.style.transform = ''; this.root.style.width = ''; this.root.style.height = ''; this.root.style.opacity = mode === 'screen' ? 0 : 1; this.root.style.pointerEvents = '';
     this.compId = compId; this.def = def;
     this.title.textContent = def.title;
     this.body.innerHTML = '';
@@ -121,13 +150,13 @@ export class PanelView {
     this.root.style.display = 'flex';
     this.open = true;
   }
-  hide() { this.root.style.display = 'none'; this.open = false; this.builder = null; this.compId = null; }
+  hide() { this.root.style.display = 'none'; this.exit.style.display = 'none'; this.open = false; this.builder = null; this.compId = null; }
   update(S) {
     if (!this.open || !this.builder) return;
     if (this.compId && S.comps[this.compId]) {
       const c = S.comps[this.compId];
       const e = eff(S, this.compId);
-      this.stat.innerHTML = `<span class="${cls(c.hp, 60, 25)}">INTEGRITY ${Math.round(c.hp)}%</span> · <span class="${e > 0 ? 'good' : 'bad'}">${e > 0 ? 'ONLINE' : 'OFFLINE'}</span>`;
+      this.stat.innerHTML = `<span class="${cls(c.hp, 60, 25)}">INTEG ${Math.round(c.hp)}%</span> <span class="${e > 0 ? 'good' : 'bad'}">${e > 0 ? '● ONLINE' : '○ OFFLINE'}</span>`;
     } else this.stat.textContent = '';
     this.builder.update(S);
   }

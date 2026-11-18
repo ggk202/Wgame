@@ -73,16 +73,16 @@ export const PANELS = {
         const minX = Math.min(...xs) - 0.5, maxX = Math.max(...xs) + 0.5, minY = Math.min(...ys) - 0.4, maxY = Math.max(...ys) + 0.4;
         const sc = Math.min(w / (maxX - minX), h / (maxY - minY));
         const P = (p) => [(p[0] - minX) * sc + (w - (maxX - minX) * sc) / 2, h - ((p[1] - minY) * sc + (h - (maxY - minY) * sc) / 2)];
-        g.fillStyle = '#05080c'; g.fillRect(0, 0, w, h);
-        g.strokeStyle = '#1a2a3a'; for (const r of [1, 1.5, 2.7, 5.2]) { const c = P([0, 0]); g.beginPath(); g.arc(c[0], c[1], r * sc, 0, 7); g.stroke(); }
+        g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
+        g.strokeStyle = '#3a1a04'; for (const r of [1, 1.5, 2.7, 5.2]) { const c = P([0, 0]); g.beginPath(); g.arc(c[0], c[1], r * sc, 0, 7); g.stroke(); }
         const sun = P([0, 0]); g.fillStyle = '#ffd860'; g.beginPath(); g.arc(sun[0], sun[1], 5, 0, 7); g.fill();
-        g.setLineDash([4, 4]); g.strokeStyle = '#3a5a7a'; g.beginPath(); pts.forEach((p, i) => { const q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke(); g.setLineDash([]);
-        WAYPOINTS.forEach((wp, i) => { const q = P(wp.pos); g.fillStyle = wp.color; g.beginPath(); g.arc(q[0], q[1], 4, 0, 7); g.fill(); g.fillStyle = i <= S.nav.leg ? '#7a8a9a' : '#cfe0f0'; g.font = '10px system-ui'; g.fillText(wp.name.split(',')[0], q[0] + 6, q[1] - 5); });
+        g.setLineDash([4, 4]); g.strokeStyle = '#8a4410'; g.beginPath(); pts.forEach((p, i) => { const q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke(); g.setLineDash([]);
+        WAYPOINTS.forEach((wp, i) => { const q = P(wp.pos); g.fillStyle = wp.color; g.beginPath(); g.arc(q[0], q[1], 4, 0, 7); g.fill(); g.fillStyle = i <= S.nav.leg ? '#7a4a20' : '#ffb060'; g.font = '10px system-ui'; g.fillText(wp.name.split(',')[0], q[0] + 6, q[1] - 5); });
         const a = WAYPOINTS[S.nav.leg].pos, b = WAYPOINTS[Math.min(S.nav.leg + 1, WAYPOINTS.length - 1)].pos;
         const f = S.nav.state === 'transit' ? S.nav.x / S.nav.L : S.nav.state === 'docked' ? 0 : 1;
         const sp = P([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
-        g.fillStyle = '#4ad0e6'; g.beginPath(); g.moveTo(sp[0], sp[1] - 6); g.lineTo(sp[0] + 5, sp[1] + 5); g.lineTo(sp[0] - 5, sp[1] + 5); g.fill();
-        g.fillStyle = '#4ad0e6'; g.font = 'bold 10px system-ui'; g.fillText('WOLFRAM', sp[0] + 7, sp[1] + 12);
+        g.fillStyle = '#ffd8a0'; g.beginPath(); g.moveTo(sp[0], sp[1] - 6); g.lineTo(sp[0] + 5, sp[1] + 5); g.lineTo(sp[0] - 5, sp[1] + 5); g.fill();
+        g.fillStyle = '#ffd8a0'; g.font = 'bold 10px monospace'; g.fillText('WOLFRAM', sp[0] + 7, sp[1] + 12);
       });
       B.kv('Leg', (S) => `${S.nav.leg + 1} of ${WAYPOINTS.length - 1}: ${WAYPOINTS[S.nav.leg].name.split(',')[0]} → ${destName(S).split(',')[0]}`);
       B.kv('Progress', (S) => (S.nav.state === 'transit' ? pct(clamp(S.nav.x / S.nav.L, 0, 9)) : stateName[S.nav.state]));
@@ -112,23 +112,23 @@ export const PANELS = {
     title: 'SENSORS',
     build(B) {
       B.canvas(400, 200, (g, S, w, h) => {
-        g.fillStyle = '#03080a'; g.fillRect(0, 0, w, h);
+        g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
         const cx = w / 2, cy = h - 10, maxR = 4500, sc = (h - 20) / maxR;
-        g.strokeStyle = '#123a2a'; g.fillStyle = '#2a6a4a'; g.font = '9px system-ui';
+        g.strokeStyle = '#4a2208'; g.fillStyle = '#a0581a'; g.font = '9px monospace';
         for (const r of [1000, 2000, 3000, 4000]) { g.beginPath(); g.arc(cx, cy, r * sc, Math.PI, 0); g.stroke(); g.fillText(r + ' km', cx + r * sc - 30, cy - 2); }
         const E = S.enc;
-        if (!E) { g.fillStyle = '#3a8a6a'; g.fillText('No contacts. Passive IR watch.', 10, 16); return; }
+        if (!E) { g.fillStyle = '#ff8a1e'; g.fillText('No contacts. Passive IR watch.', 10, 16); return; }
         const ang = (id) => { let h2 = 0; for (const ch of id) h2 = (h2 * 31 + ch.charCodeAt(0)) % 1000; return Math.PI * (0.15 + 0.7 * (h2 / 1000)); };
         for (const e of E.enemies) {
           if (e.dead || e.gone) continue;
           const a = ang(e.id), r = Math.min(maxR, e.range) * sc;
           const x = cx - Math.cos(a) * r, y = cy - Math.sin(a) * r;
-          g.fillStyle = S.sensors.lock === e.id ? '#ff6040' : '#ffb040';
+          g.fillStyle = S.sensors.lock === e.id ? '#ff3b2f' : '#ffb040';
           g.beginPath(); g.arc(x, y, e.type === 'drone' ? 3 : 5, 0, 7); g.fill();
           g.fillText(e.name.slice(0, 22), x + 7, y + 3);
           for (const p of E.proj) if (p.src === e.id && p.from === 'them') { const rr = Math.min(maxR, p.range) * sc; g.fillStyle = p.type === 'missile' ? '#ff4040' : '#ffffff'; g.fillRect(cx - Math.cos(a) * rr - 1.5, cy - Math.sin(a) * rr - 1.5, 3, 3); }
         }
-        g.fillStyle = '#4ad0e6'; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
+        g.fillStyle = '#ffd8a0'; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
       });
       B.kv('Sensor suite / array', (S) => `${pct(eff(S, 'sensors'))} / ${pct(eff(S, 'sensorArray'))}${S.effects.stormT > 0 ? ' · STORM INTERFERENCE' : ''}`);
       B.bar('Target lock', (S) => ({ v: S.sensors.q, text: S.sensors.lock ? pct(S.sensors.q) : 'none', cls: S.sensors.q > 0.4 ? 'good' : 'warn' }));
@@ -469,4 +469,38 @@ export function statusBlock(B) {
     }
     return h + '</table>';
   });
+}
+
+// ---------- compact live readouts drawn on the in-world screens ----------
+const pc = (v) => Math.round(v * 100) + '%';
+const C = (v, w, b, hi) => cls(v, w, b, hi);
+export function screenInfo(S, id) {
+  const c = S.comps[id], N = S.nav, R = S.reactor, D = S.drive;
+  const name = COMPS[id].name.toUpperCase();
+  const integ = ['INTEGRITY', c.hp / 100, C(c.hp, 60, 25)];
+  const rem = N.L - N.x;
+  switch (id) {
+    case 'helm': return { title: 'HELM', lines: [['STATUS', stateName[N.state]], ['RANGE', N.state === 'transit' ? fmtDist(rem) : '—'], ['VELOCITY', kmps(N.v)], ['DRIVE', D.flip > 0 ? 'FLIP' : D.ignited ? `${D.g.toFixed(2)} g ${D.orient > 0 ? 'PRO' : 'RETRO'}` : 'COLD', D.locked > 0 ? 'bad' : ''], ['AUTOPILOT', S.settings.autopilot ? (N.autopilot ? 'ENGAGED' : 'OFF') : 'N/A']], bars: [['REACTION MASS', S.mass.rmass / SHIP.rmassMax, C(S.mass.rmass, 500, 200)]] };
+    case 'navcomp': return { title: 'NAVIGATION', lines: [['LEG', `${N.leg + 1}/${WAYPOINTS.length - 1}`], ['TARGET', destName(S).split(',')[0].toUpperCase()], ['RANGE', N.state === 'transit' ? fmtDist(rem) : '—'], ['PLAN', `${N.plan.cruise} km/s @ ${N.plan.g.toFixed(2)} g`]], bars: [['PROGRESS', N.state === 'transit' ? clamp(N.x / N.L, 0, 1) : 1, 'good']] };
+    case 'tactical': { const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock); const inc = S.enc ? S.enc.proj.filter((p) => p.from === 'them').length : 0; return { title: 'FIRE CONTROL', lines: [['TARGET', t ? t.name.split(' “')[0].toUpperCase() : 'NONE', t ? '' : 'warn'], ['TUBES', S.weap.tubes.map((x) => (x.loaded ? 'RDY' : '---')).join(' ')], ['PDC', `${S.weap.pdcMode.toUpperCase()} · ${S.stores.pdcAmmo}`], ['INCOMING', String(inc), inc ? 'bad' : '']], bars: [['RAIL CAP', S.weap.rail, S.weap.rail >= 1 ? 'good' : 'warn']] }; }
+    case 'sensors': { const live = S.enc ? S.enc.enemies.filter((e) => !e.dead && !e.gone) : []; const near = live.length ? Math.min(...live.map((e) => e.range)) : 0; return { title: 'SENSORS', lines: [['CONTACTS', String(live.length), live.length ? 'bad' : ''], ['NEAREST', live.length ? near.toFixed(0) + ' km' : '—'], ['ARRAY', pc(eff(S, 'sensorArray'))], ['PING', S.sensors.pingCd > 0 ? Math.ceil(S.sensors.pingCd) + ' s' : 'READY']], bars: [['LOCK', S.sensors.q, S.sensors.q > 0.4 ? 'good' : 'warn']], radar: live.map((e) => e.range) }; }
+    case 'comms': { const m = S.msgs[S.msgs.length - 1]; return { title: 'COMMS', lines: [['FROM', m ? m.from.toUpperCase().slice(0, 22) : '—'], ['', m ? m.text.slice(0, 30) : 'NO TRAFFIC'], ['', m ? m.text.slice(30, 60) : ''], ['CREDITS', String(S.credits)], ['PORT', N.state === 'docked' ? 'DOCKED' : N.state === 'orbit' ? 'REQ DOCK' : '—']] }; }
+    case 'status': { const fires = COMP_IDS.filter((x) => S.comps[x].fire > 0).length; const dead = COMP_IDS.filter((x) => S.comps[x].hp <= 0).length; return { title: 'SHIP STATUS', lines: [['ALERT', S.alert.toUpperCase(), S.alert === 'red' ? 'bad' : S.alert === 'yellow' ? 'warn' : ''], ['FIRES', String(fires), fires ? 'bad' : ''], ['BREACHES', String(S.breaches.length), S.breaches.length ? 'bad' : ''], ['SYSTEMS DOWN', String(dead), dead ? 'bad' : ''], ['BACKUP CREW', String(S.pods)]], bars: [['HULL', S.hull / 100, C(S.hull, 50, 25)], ['HEAT', heatFrac(S), C(heatFrac(S), 0.7, 0.9, true)]] }; }
+    case 'lifesupport': return { title: 'ATMOSPHERE', lines: [['O2 RESERVE', Math.round(S.life.o2) + ' kg', C(S.life.o2, 300, 120)], ['N2 RESERVE', Math.round(S.life.n2) + ' kg', C(S.life.n2, 600, 200)], ['WATER', Math.round(S.life.water) + ' L'], ...S.decks.filter((d) => !d.ext).reverse().map((d) => { const P = d.o2 + d.n2 + d.co2; return [DECKS[d.id].name.toUpperCase(), `${P.toFixed(0)} kPa O2 ${d.o2.toFixed(0)}`, P < 60 ? 'bad' : d.o2 < 16 ? 'warn' : '']; })] };
+    case 'scrubbers': return { title: 'CO2 SCRUBBERS', lines: [['EFFICIENCY', pc(S.scrubE || 0), C(S.scrubE || 0, 0.5, 0.2)], ['BAKE-OUT', S.life.regen > 0 ? Math.ceil(S.life.regen) + ' s' : 'IDLE'], ['MAX CO2', Math.max(...S.decks.filter((d) => !d.ext).map((d) => d.co2)).toFixed(2) + ' kPa']], bars: [['SATURATION', S.life.sat, C(S.life.sat, 0.6, 0.85, true)]] };
+    case 'recycler': return { title: 'WATER RECYCLER', lines: [['RESERVE', Math.round(S.life.water) + ' L'], ['RECOVERY', pc(eff(S, 'recycler'))]], bars: [integ] };
+    case 'hydro': return { title: 'HYDROPONICS', lines: [['FOOD', Math.round(S.life.food) + ' kg'], ['YIELD', (2.5 * eff(S, 'hydro')).toFixed(1) + ' kg/day']], bars: [integ] };
+    case 'medbay': return { title: 'MEDBAY', lines: Object.values(S.players).filter((p) => p.connected).slice(0, 5).map((p) => [p.name.toUpperCase().slice(0, 12), p.state === 'alive' ? `${Math.round(p.hp)} HP ${p.dose.toFixed(1)} SV` : p.state.toUpperCase(), p.state !== 'alive' || p.hp < 40 ? 'bad' : '']) };
+    case 'cryo': return { title: 'CRYO BAY', lines: [['PODS', String(S.pods), S.pods ? '' : 'bad'], ['POWER', eff(S, 'cryo') > 0 ? 'NOMINAL' : 'FAILING', eff(S, 'cryo') > 0 ? '' : 'bad']], bars: [integ] };
+    case 'reactor': return { title: 'FUSION REACTOR', lines: [['STATE', R.state.toUpperCase(), R.state === 'running' ? '' : 'bad'], ['OUTPUT', S.power.gen.toFixed(1) + ' MWe'], ['FIELD ERR', R.state === 'running' ? (R.field - R.drift >= 0 ? '+' : '') + (R.field - R.drift).toFixed(2) : '—', Math.abs(R.field - R.drift) > 0.15 ? 'warn' : ''], ['PELLETS', S.mass.pellets.toFixed(0) + ' kg']], bars: [['OUTPUT', R.actual, 'good'], ['STABILITY', R.stab, C(R.stab, 0.5, 0.25)]] };
+    case 'powerdist': case 'battery': { const cap = S.power.cap || SHIP.batteryMWh; return { title: 'POWER', lines: [['GENERATION', S.power.gen.toFixed(1) + ' MW'], ['DEMAND', S.power.demand.toFixed(1) + ' MW'], ['SHED', S.power.deficit.toFixed(1) + ' MW', S.power.deficit > 0.5 ? 'bad' : ''], ['BREAKERS OFF', String(COMP_IDS.filter((x) => !S.comps[x].on).length)]], bars: [['BATTERY', S.battery.charge / cap, C(S.battery.charge / cap, 0.3, 0.1)]] }; }
+    case 'thermal': case 'coolpump': return { title: 'THERMAL', lines: [['HEAT IN', S.heat.inMW.toFixed(0) + ' MW'], ['RADIATED', S.heat.outMW.toFixed(0) + ' MW'], ['RADIATORS', S.heat.radExt ? 'EXTENDED' : 'RETRACTED'], ['PUMPS', pc(eff(S, 'coolpump'))]], bars: [['HEAT SINK', heatFrac(S), C(heatFrac(S), 0.7, 0.9, true)]] };
+    case 'fabricator': { const j = S.fab.queue[0]; return { title: 'FABRICATOR', lines: [['FEEDSTOCK', Math.round(S.stores.feedstock) + ' kg'], ['QUEUE', String(S.fab.queue.length)], ['JOB', j ? j.name.toUpperCase().slice(0, 18) : 'IDLE']], bars: [['PROGRESS', j ? j.p : 0, 'good']] }; }
+    case 'stores': return { title: 'STORES', lines: [['SPARE KITS', String(S.stores.spares), S.stores.spares ? '' : 'bad'], ['HULL PATCHES', String(S.stores.patch)], ['MEDKITS', String(S.stores.medkit)], ['CARTRIDGES', String(S.stores.cartridge)], ['FEEDSTOCK', Math.round(S.stores.feedstock) + ' kg']] };
+    case 'magazine': return { title: 'MAGAZINE', lines: [['TORPEDOES', String(S.stores.missiles)], ...S.weap.tubes.map((t, i) => [`TUBE ${i + 1}`, t.loaded ? 'LOADED' : t.load > 0 ? 'LOADING ' + pc(t.load) : 'EMPTY', t.loaded ? '' : 'warn']), ['SLUGS', String(S.stores.slugs)]] };
+    case 'dronebay': return { title: 'DRONE BAY', lines: [['AVAILABLE', `${S.drones.total - S.drones.jobs.length}/${S.drones.total}`], ...S.drones.jobs.slice(0, 3).map((j) => [j.target === 'hull' ? 'HULL' : COMPS[j.target].name.toUpperCase().slice(0, 16), Math.ceil(j.t) + ' s'])] };
+    case 'drivecore': case 'drivectl': return { title: 'TORCH DRIVE', lines: [['STATE', D.ignited ? 'IGNITED' : 'COLD', D.ignited ? '' : 'warn'], ['THRUST', `${(D.acc / G0).toFixed(2)} g`], ['THROTTLE', pc(D.throttle)], ['VALVE', D.locked > 0 ? 'STUCK' : 'OK', D.locked > 0 ? 'bad' : '']], bars: [['NOZZLE PWR', Math.min(1, S.comps.drivecore.pw), 'good']] };
+    case 'tanks': case 'injector': return { title: 'PROPELLANT', lines: [['REACTION MASS', S.mass.rmass.toFixed(0) + ' t'], ['DELTA-V', (deltaV(S) / 1000).toFixed(0) + ' km/s'], ['PELLETS', S.mass.pellets.toFixed(0) + ' kg']], bars: [['TANKS', S.mass.rmass / SHIP.rmassMax, C(S.mass.rmass, 500, 200)], ['CONTAMINATION', S.mass.contam, C(S.mass.contam, 0.15, 0.4, true)]] };
+    default: return { title: name.slice(0, 22), lines: [['STATE', c.hp > 0 ? 'OPERATIONAL' : 'DESTROYED', c.hp > 0 ? '' : 'bad']], bars: [integ] };
+  }
 }
