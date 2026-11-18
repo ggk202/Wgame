@@ -3,6 +3,7 @@ import { COMPS, COMP_IDS, DECKS, WAYPOINTS, SHIP, G0, RECIPES, STATION_PRICES, I
 import { fmtDist, fmtTime, fmtGameTime, clamp, pct } from './util.js';
 import { eff, maxG, deltaV, heatFrac, demandOf, PDCS, ringRpm } from './sim.js';
 import { qrot, qconj, nose, angDeg, sasModes, rollErr } from './attitude.js';
+import { PARTS, PART_IDS, repairNeeds, missingParts, moduleOf } from './repair.js';
 import { RAIL_CONE } from './combat.js';
 import { ENEMY_TYPES } from './combat.js';
 import { EVENTS } from './events.js';
@@ -350,11 +351,13 @@ export const PANELS = {
   stores: {
     title: 'STORES',
     build(B) {
-      B.html((S) => `<div class="grid2">${['spares', 'patch', 'medkit', 'cartridge'].map((t) => `<button class="btn" data-act="stores.take" data-args='{"type":"${t}"}' ${S.stores[t] > 0 ? '' : 'disabled'}>Take ${ITEMS[t].name} <i>(${S.stores[t]})</i></button>`).join('')}</div>`);
+      B.html((S) => '<table class="tbl"><tr><th>Spare parts</th><th>In stock</th><th>Needed now</th></tr>' + PART_IDS.map((k) => { const need = COMP_IDS.reduce((n, id) => { const r = repairNeeds(S, id); return n + (r ? r.parts[k] || 0 : 0); }, 0); return `<tr><td>${PARTS[k].name}</td><td class="${S.stores[k] ? (S.stores[k] < need ? 'warn' : '') : 'bad'}">${S.stores[k]}</td><td>${need || '—'}</td></tr>`; }).join('') + '</table>');
+      B.note('Parts are drawn from these stocks automatically when a repair procedure is finished at the faulty module. Make more at the Fabricator, buy them in port, or trade for them.');
+      B.html((S) => `<div class="grid2">${['patch', 'medkit', 'cartridge'].map((t) => `<button class="btn" data-act="stores.take" data-args='{"type":"${t}"}' ${S.stores[t] > 0 ? '' : 'disabled'}>Take ${ITEMS[t].name} <i>(${S.stores[t]})</i></button>`).join('')}</div>`);
       B.buttons([{ label: 'Return held item', act: 'stores.return', enabled: () => !!B.ctx.me().item }]);
       B.kv('Munitions', (S) => `${S.stores.missiles} torpedoes · ${S.stores.slugs} slugs · ${S.stores.pdcAmmo} PDC rds · ${S.stores.chaff} chaff`);
       B.kv('Feedstock / credits', (S) => `${Math.round(S.stores.feedstock)} kg · ${S.credits} cr`);
-      B.note('Carry items by hand. A Spare Parts Kit repairs about 60 points of damage and is needed for destroyed components. Hull Patches seal breaches. Medkits revive downed crew.');
+      B.note('Carry these by hand: Hull Patches seal breaches, Medkits revive downed crew, Cartridges regenerate the CO₂ scrubbers.');
     },
   },
   drones: {
@@ -363,9 +366,9 @@ export const PANELS = {
       B.kv('Drones available', (S) => `${S.drones.total - S.drones.jobs.length} / ${S.drones.total}`);
       B.html((S) => '<table class="tbl"><tr><th>External system</th><th>Integrity</th><th></th></tr>' + COMP_IDS.filter((id) => COMPS[id].ext).map((id) => {
         const job = S.drones.jobs.find((j) => j.target === id);
-        return `<tr><td>${COMPS[id].name}</td><td>${bar(S.comps[id].hp / 100, cls(S.comps[id].hp, 60, 25), Math.round(S.comps[id].hp) + '%')}</td><td>${job ? `working ${Math.ceil(job.t)} s` : btn('Dispatch (1 spare kit)', 'drones.send', { target: id }, 'mini')}</td></tr>`;
+        return `<tr><td>${COMPS[id].name}</td><td>${bar(S.comps[id].hp / 100, cls(S.comps[id].hp, 60, 25), Math.round(S.comps[id].hp) + '%')}</td><td>${job ? `working ${Math.ceil(job.t)} s` : (() => { const n = repairNeeds(S, id); return n ? btn(`Dispatch (${Object.entries(n.parts).map(([k, c]) => c + '× ' + PARTS[k].short).join(' ')})`, 'drones.send', { target: id }, 'mini') : S.comps[id].hp < 100 ? '<i class="dim">light wear only</i>' : '—'; })()}</td></tr>`;
       }).join('') + `<tr><td>Hull plating</td><td>${bar(S.hull / 100, cls(S.hull, 50, 25), Math.round(S.hull) + '%')}</td><td>${S.drones.jobs.find((j) => j.target === 'hull') ? 'working' : btn('Dispatch (1 hull patch)', 'drones.send', { target: 'hull' }, 'mini')}</td></tr></table>`);
-      B.note('Drones repair external systems remotely: about 35 s per job, using stock from Stores. Crew can also repair them by hand on an EVA. Suit up, cycle out through the airlock on this deck, and keep the drive below 0.6 g. Hand-repair is faster than drones, and a Hull Patch can be welded onto the hull plating directly.');
+      B.note('Drones fix external faults remotely in about 35 s, using the same spare parts as a hand repair. Crew can also repair them on an EVA: suit up, cycle out through the airlock on this deck and keep the drive off. A Hull Patch can be welded onto the hull plating directly.');
     },
   },
   magazine: {
@@ -425,7 +428,7 @@ export const PANELS = {
       B.note(`<b>${COMPS[id].name}</b>: ${info}`);
       B.bar('Integrity', (S) => ({ v: S.comps[id].hp / 100, text: Math.round(S.comps[id].hp) + '%', cls: cls(S.comps[id].hp, 60, 25) }));
       B.kv('Drone job', (S) => (S.drones.jobs.some((j) => j.target === id) ? 'a drone is working on it' : '—'));
-      B.note('Hold R here to repair it by hand. Destroyed units need a Spare Parts Kit in your hands.');
+      B.note((S) => { const n = repairNeeds(S, id); return n ? `Fault: <b>${n.issues.map((i) => i.label).join(' + ')}</b>. Press R next to it for the repair procedure (uses ${Object.entries(n.parts).map(([k, c]) => c + '× ' + PARTS[k].name).join(', ')}), or send a drone from the Drone Bay.` : 'No fault. Hold R next to it to tend light wear.'; });
     },
   },
   airlock: {
@@ -575,7 +578,8 @@ function contactList(S) {
 export function statusBlock(B) {
   B.kv('Hull integrity', (S) => ({ text: `${Math.round(S.hull)}% · ${S.breaches.length} breach(es)`, cls: cls(S.hull, 50, 25) }));
   B.kv('Backup crew / credits', (S) => `${S.pods} pods · ${S.credits} cr`);
-  B.kv('Stores', (S) => `${S.stores.spares} spares · ${S.stores.patch} patches · ${S.stores.medkit} medkits · ${S.stores.cartridge} cartridges · ${Math.round(S.stores.feedstock)} kg feedstock`);
+  B.kv('Spare parts', (S) => PART_IDS.map((k) => `${PARTS[k].short} ${S.stores[k]}`).join(' · '));
+  B.kv('Stores', (S) => `${S.stores.patch} patches · ${S.stores.medkit} medkits · ${S.stores.cartridge} cartridges · ${Math.round(S.stores.feedstock)} kg feedstock`);
   B.html((S) => {
     let h = '<table class="tbl status"><tr><th>System</th><th>Integrity</th><th>State</th></tr>';
     for (const d of [4, 3, 2, 1, 0, -1]) {
@@ -626,7 +630,7 @@ export function screenInfo(S, id) {
     case 'powerdist': case 'battery': { const cap = S.power.cap || SHIP.batteryMWh; return { title: 'POWER', lines: [['GENERATION', S.power.gen.toFixed(1) + ' MW'], ['DEMAND', S.power.demand.toFixed(1) + ' MW'], ['SHED', S.power.deficit.toFixed(1) + ' MW', S.power.deficit > 0.5 ? 'bad' : ''], ['BREAKERS OFF', String(COMP_IDS.filter((x) => !S.comps[x].on).length)]], bars: [['BATTERY', S.battery.charge / cap, C(S.battery.charge / cap, 0.3, 0.1)]] }; }
     case 'thermal': case 'coolpump': return { title: 'THERMAL', lines: [['HEAT IN', S.heat.inMW.toFixed(0) + ' MW'], ['RADIATED', S.heat.outMW.toFixed(0) + ' MW'], ['RADIATORS', S.heat.radExt ? 'EXTENDED' : 'RETRACTED'], ['PUMPS', pc(eff(S, 'coolpump'))]], bars: [['HEAT SINK', heatFrac(S), C(heatFrac(S), 0.7, 0.9, true)]] };
     case 'fabricator': { const j = S.fab.queue[0]; return { title: 'FABRICATOR', lines: [['FEEDSTOCK', Math.round(S.stores.feedstock) + ' kg'], ['QUEUE', String(S.fab.queue.length)], ['JOB', j ? j.name.toUpperCase().slice(0, 18) : 'IDLE']], bars: [['PROGRESS', j ? j.p : 0, 'good']] }; }
-    case 'stores': return { title: 'STORES', lines: [['SPARE KITS', String(S.stores.spares), S.stores.spares ? '' : 'bad'], ['HULL PATCHES', String(S.stores.patch)], ['MEDKITS', String(S.stores.medkit)], ['CARTRIDGES', String(S.stores.cartridge)], ['FEEDSTOCK', Math.round(S.stores.feedstock) + ' kg']] };
+    case 'stores': return { title: 'STORES', lines: [...PART_IDS.slice(0, 4).map((k) => [PARTS[k].short, String(S.stores[k]), S.stores[k] ? '' : 'bad']), ['HULL PATCHES', String(S.stores.patch)], ['MEDKITS', String(S.stores.medkit)], ['CARTRIDGES', String(S.stores.cartridge)], ['FEEDSTOCK', Math.round(S.stores.feedstock) + ' kg']] };
     case 'magazine': return { title: 'MAGAZINE', lines: [['TORPEDOES', String(S.stores.missiles)], ...S.weap.tubes.map((t, i) => [`TUBE ${i + 1}`, t.loaded ? 'LOADED' : t.load > 0 ? 'LOADING ' + pc(t.load) : 'EMPTY', t.loaded ? '' : 'warn']), ['SLUGS', String(S.stores.slugs)]] };
     case 'dronebay': return { title: 'DRONE BAY', lines: [['AVAILABLE', `${S.drones.total - S.drones.jobs.length}/${S.drones.total}`], ...S.drones.jobs.slice(0, 3).map((j) => [j.target === 'hull' ? 'HULL' : COMPS[j.target].name.toUpperCase().slice(0, 16), Math.ceil(j.t) + ' s'])] };
     case 'drivecore': case 'drivectl': return { title: 'TORCH DRIVE', lines: [['STATE', D.ignited ? 'IGNITED' : 'COLD', D.ignited ? '' : 'warn'], ['THRUST', `${(D.acc / G0).toFixed(2)} g`], ['THROTTLE', pc(D.throttle)], ['VALVE', D.locked > 0 ? 'STUCK' : 'OK', D.locked > 0 ? 'bad' : '']], bars: [['NOZZLE PWR', Math.min(1, S.comps.drivecore.pw), 'good']] };

@@ -1,5 +1,6 @@
 // Initial game state factory. The whole game state is plain JSON so it can be synced and saved.
 import { COMPS, COMP_IDS, DECKS, SHIP, DIFFICULTY, STORYTELLERS, LENGTHS, WAYPOINTS, AU, VERSION } from './config.js';
+import { PARTS } from './repair.js';
 
 export function legLength(leg) {
   const a = WAYPOINTS[leg].pos, b = WAYPOINTS[leg + 1].pos;
@@ -48,7 +49,7 @@ export function createState(opts = {}) {
     att: { q: [0, 0, 0, 1], w: [0, 0, 0], mode: D.sas === 'none' ? 'off' : 'hold', cmd: [0, 0, 0], tcmd: [0, 0, 0], cmdT: 0, err: 0, rcs: false },
     prox: null,
     life: { o2: 1200, n2: 3500, water: 3000, food: 160, electrolysis: true, sat: 0.15, regen: 0, suppressant: 4 },
-    stores: { spares: 10, patch: 6, medkit: 6, cartridge: 3, feedstock: 300, missiles: 6, srm: 16, slugs: 30, pdcAmmo: 6000, chaff: 4 },
+    stores: { ...Object.fromEntries(Object.entries(PARTS).map(([k, p]) => [k, p.start])), patch: 6, medkit: 6, cartridge: 3, feedstock: 300, missiles: 6, srm: 16, slugs: 30, pdcAmmo: 6000, chaff: 4 },
     fab: { queue: [] },
     drones: { total: 4, jobs: [] },
     weap: { rail: 0, charging: false, tubes: [{ loaded: true, load: 0 }, { loaded: false, load: 0 }], pdcMode: D.autoPDC ? 'auto' : 'manual', chaffT: 0, focus: [], cells: 8, cellT: 0, pdcFire: [0, 0, 0] },

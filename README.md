@@ -107,9 +107,30 @@ Every screen on the ship is live, showing its system's readouts in a retro amber
 
 **Exterior (EVA):** suit up at an emergency locker, then cycle out through the starboard airlock on the Cargo deck. You fly a SAFER-style jet pack (`WASD`, `Space`/`C`, `Shift` for more push) on a 110 m safety tether. Near the hull, letting go means grabbing a handrail. Out in the open you drift.
 
-You can repair the external systems by hand (`R`, with a spare kit if destroyed): two radiator wings (they glow as the heat sink fills), three gatling PDCs, the missile launcher, the spinal railgun, the high-gain antenna and the sensor array. You can also weld hull plating with a Hull Patch (`F`).
+You can repair the external systems by hand on EVA (`R` opens the repair procedure): two radiator wings (they glow as the heat sink fills), three gatling PDCs, the missile launcher, the spinal railgun, the high-gain antenna and the sensor array. You can also weld hull plating with a Hull Patch (`F`).
 
 Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at the hatch), and weapon hits on external systems hurt crew nearby. Any thrust above 0.08 g sweeps you off the hull and the tether reels you in, injured. Repair drones remain the remote alternative.
+
+## Repairs and parts
+
+Damaged modules develop a specific fault, chosen from the faults that module type can actually have. Press `R` at the module to open its **repair procedure**: a 3D workbench where you strip it down with a screwdriver (swappable bits), ratchet wrench (sockets), tweezers, wire cutters, insulating tape, a compact welder and a probe/multimeter. Pick a tool with `1–8`, change bit or socket with `B`, and hold the mouse (or your finger) on a part to work it.
+
+There are six procedures:
+
+- **Circuit:** unscrew the access panel, pull scorched cards, seat spares, cut out burnt wiring, then splice and tape it. Close up and probe the test port.
+- **Seals:** close the isolation valve and undo the flange bolts. Swap the gasket, then torque the bolts back in a star pattern and pressure-test.
+- **Bearings:** open the cover, unbolt the retaining plate and draw off the seized bearing. Press on a new one, then test-run the motor.
+- **High voltage:** lock out the breaker and discharge the capacitor bank with the probe. Then swap the blown fuses or cells and restore power.
+- **Welding:** trace the welder along the whole crack, let the bead cool, then inspect it.
+- **Optics:** unbolt the damaged sensor head and seat a new one. Then turn the alignment knob until the signal peaks.
+
+There is no universal spare kit any more. Each fault uses specific parts from stores: circuit cards, wiring looms, seals, bearings, HV cells/fuses, weld filler and optics. Fabricate parts on the Cargo deck, buy them in port or find them in salvage. A destroyed module has two faults to fix.
+
+Difficulty changes the work:
+
+- **Recruit:** highlights the next part, and one bit fits everything.
+- **Veteran:** no highlights, and mixed fastener sizes.
+- **Newtonian:** every screw and bolt can be a different size and drive, unmarked. The wrong bit chews a screw head, a bolt done out of star order pinches the gasket, and touching a live HV circuit shocks you.
 
 ## Hard sci-fi rules
 
@@ -141,7 +162,7 @@ Storytellers: **Cassiopeia** (steady escalation), **Halley** (merciful), **Kessl
 
 ## Controls
 
-Desktop: `WASD` move, mouse look (click to capture), `Shift` run, `E` use, `R` (hold) repair, `F` (hold) use item, `G` drop, `Tab` ship status, `T` chat, `1–4` vote, `H` help, `M` mute, `Esc` menu.
+Desktop: `WASD` move, mouse look (click to capture), `Shift` run, `E` use, `R` repair procedure (hold for routine maintenance), `F` (hold) use item, `G` drop, `Tab` ship status, `T` chat, `1–4` vote, `H` help, `M` mute, `Esc` menu.
 
 iPad and tablets: left virtual stick to move, drag the right side to look, and the **USE / REPAIR / ITEM / DROP** buttons.
 

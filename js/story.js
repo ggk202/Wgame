@@ -131,15 +131,15 @@ export function pirateDemand(S) {
   E.hailed = true;
   if (E.kind === 'drones') { log(S, 'No response — the drones are automated.', 'info'); return null; }
   if (E.kind === 'blockade') { log(S, 'Blockade: "Cut your drive. This is not a negotiation."', 'warn'); return null; }
-  startVote(S, 'pirate_demand', 'Pirates answer the hail', `“Half your feedstock and spares and we let you go, Wolfram. Or we take it off your wreck.”`,
-    [{ id: 'pay', label: `Pay (−${Math.floor(S.stores.feedstock / 2)} kg feedstock, −${Math.floor(S.stores.spares / 2)} spare kits)` }, { id: 'bribe', label: 'Offer 20 credits instead' }, { id: 'fight', label: 'Refuse — fight', default: true }], {}, 25);
+  startVote(S, 'pirate_demand', 'Pirates answer the hail', `“Half your feedstock and spare parts and we let you go, Wolfram. Or we take it off your wreck.”`,
+    [{ id: 'pay', label: `Pay (−${Math.floor(S.stores.feedstock / 2)} kg feedstock, half of every spare part)` }, { id: 'bribe', label: 'Offer 20 credits instead' }, { id: 'fight', label: 'Refuse — fight', default: true }], {}, 25);
   return null;
 }
 function resolvePirateDemand(S, opt) {
   const E = S.enc;
   if (!E) return;
   if (opt === 'pay' || (opt === 'bribe' && S.credits >= 20 && chance(0.55))) {
-    if (opt === 'pay') { S.stores.feedstock = Math.ceil(S.stores.feedstock / 2); S.stores.spares = Math.ceil(S.stores.spares / 2); }
+    if (opt === 'pay') { S.stores.feedstock = Math.ceil(S.stores.feedstock / 2); for (const k of ['board', 'wire', 'seal', 'bearing', 'cell', 'filler', 'optic']) S.stores[k] = Math.ceil(S.stores[k] / 2); }
     else S.credits -= 20;
     for (const e of E.enemies) e.fleeing = true;
     E.proj = E.proj.filter((p) => p.from === 'us');

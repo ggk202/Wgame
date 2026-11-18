@@ -1,6 +1,7 @@
 // Host-authoritative ship simulation. step(S, dt) advances everything by dt real seconds.
 import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKERS, EXT_DECK, EXT, AIRLOCK, ROOM_R, RING, RING_DECK, atmoDeck } from './config.js';
 import { clamp, rand, randn, chance, pick, polar, compPos, log, fx } from './util.js';
+import { assignIssue } from './repair.js';
 import { updateCombat, updateWeapons } from './combat.js';
 import { storyStep, updateVote, updateEffects } from './story.js';
 import { updateAttitude, updateProx, startApproach, nose, sasModes, kick } from './attitude.js';
@@ -84,6 +85,9 @@ function updateComps(S, dt) {
     if (S.nav.state === 'docked') w *= 0.2;
     c.hp -= w * dt;
     if (set.nanites > 0 && c.fire <= 0 && (c.hp > 0 || set.naniteBreach)) c.hp += (set.nanites / 60) * dt;
+    // hands-on faults: below 85% a module has a specific problem (and parts list) until someone fixes it
+    if (c.hp < 85) assignIssue(S, id);
+    else if (c.hp >= 99.5 && (c.issue !== null && c.issue !== undefined)) { c.issue = null; c.issue2 = null; }
 
     // fire
     if (c.fire > 0 && !def.ext) {

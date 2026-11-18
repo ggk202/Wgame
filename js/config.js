@@ -112,7 +112,7 @@ export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : d === RING_D
 export const SHELTER = { deck: 3, a: 180, r: 7.0, rad: 2.1 }; // storm shelter zone (water-wall cubicle)
 
 export const ITEMS = {
-  spares:    { name: 'Spare Parts Kit', color: 0xf0b030, short: 'SPARES' },
+  spares:    { name: 'Old spare kit (obsolete)', color: 0xf0b030, short: 'SCRAP' },
   patch:     { name: 'Hull Patch', color: 0x9aa7b8, short: 'PATCH' },
   ext:       { name: 'Extinguisher', color: 0xe03030, short: 'EXTING.' },
   medkit:    { name: 'Medkit', color: 0xf5f5f5, short: 'MEDKIT' },
@@ -120,7 +120,13 @@ export const ITEMS = {
 };
 
 export const RECIPES = {
-  spares:     { name: 'Spare Parts Kit', kg: 20, t: 25, qty: 1 },
+  board:      { name: 'Circuit cards x2', kg: 12, t: 30, qty: 2 },
+  wire:       { name: 'Wiring & splice kits x3', kg: 9, t: 15, qty: 3 },
+  seal:       { name: 'Seals & gaskets x3', kg: 12, t: 20, qty: 3 },
+  bearing:    { name: 'Bearings & actuators x2', kg: 20, t: 30, qty: 2 },
+  cell:       { name: 'Power cells & HV fuses x2', kg: 24, t: 35, qty: 2 },
+  filler:     { name: 'Weld filler rod x4', kg: 12, t: 12, qty: 4 },
+  optic:      { name: 'Optics & sensor head', kg: 5, t: 45, qty: 1 },
   patch:      { name: 'Hull Patch', kg: 10, t: 15, qty: 1 },
   medkit:     { name: 'Medkit', kg: 6, t: 20, qty: 1 },
   cartridge:  { name: 'Scrubber Cartridge', kg: 8, t: 15, qty: 1 },
@@ -179,7 +185,13 @@ export const WAYPOINTS = [
 ];
 
 export const STATION_PRICES = {
-  spares:     { name: 'Spare Parts Kit x2', cost: 5 },
+  board:      { name: 'Circuit cards x4', cost: 4 },
+  wire:       { name: 'Wiring & splice kits x6', cost: 2 },
+  seal:       { name: 'Seals & gaskets x6', cost: 3 },
+  bearing:    { name: 'Bearings & actuators x4', cost: 4 },
+  cell:       { name: 'Power cells & HV fuses x4', cost: 4 },
+  filler:     { name: 'Weld filler rod x8', cost: 2 },
+  optic:      { name: 'Optics & sensor heads x2', cost: 5 },
   patch:      { name: 'Hull Patch x2', cost: 4 },
   medkit:     { name: 'Medkit x2', cost: 3 },
   cartridge:  { name: 'Scrubber Cartridge x2', cost: 3 },

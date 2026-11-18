@@ -14,6 +14,8 @@ import { Sfx } from './audio.js';
 import { ExtView } from './extview.js';
 import { sasModes } from './attitude.js';
 import { Tutorial } from './tutorial.js';
+import { RepairGame } from './minigame.js';
+import { repairNeeds, missingParts, PARTS } from './repair.js';
 
 const ART = !!window.WOLFRAM_ARTIFACT;
 const QS = (() => { try { return new URLSearchParams(location.search); } catch (e) { return new URLSearchParams(); } })();
@@ -114,6 +116,11 @@ function startHost(role, who, S) {
   if (!S.ring) S.ring = { g: 0, target: 0, spin: 0, wear: 0, brake: false };
   if (S.weap.cells === undefined) { S.weap.cells = 8; S.weap.cellT = 0; S.weap.pdcFire = [0, 0, 0]; }
   if (S.stores.srm === undefined) S.stores.srm = 16;
+  if (S.stores.board === undefined) { // pre-parts saves: the old universal spares are traded in for typed parts
+    const old = S.stores.spares || 0;
+    for (const [k, d] of Object.entries(PARTS)) S.stores[k] = d.start + Math.floor(old / 4);
+    delete S.stores.spares;
+  }
   for (const id of COMP_IDS) if (!S.comps[id]) S.comps[id] = { id, hp: 100, fire: 0, on: true, pw: 1, prio: COMPS[id].prio, fault: 0, reboot: 0 };
   for (const p of Object.values(S.players)) if (p.y === undefined) p.y = 0;
   S.fx = [];
@@ -190,6 +197,7 @@ function enterGame() {
   $('#game').style.display = 'block';
   if (!G.world) {
     G.cams = new CamView();
+    G.repair = new RepairGame({ S: () => G.S, act, sfx: G.sfx, toast: (t, k) => G.hud.toast(t, k), me: () => meView(), onClose: () => {} });
     G.world = new World($('#view'));
     G.world.screenInfo = screenInfo;
     G.world.setQuality(prefs.quality || (G.touchMode || isTouchDevice() ? 'medium' : 'high'));
@@ -198,7 +206,7 @@ function enterGame() {
     G.panel = new PanelView($('#panel'), panelCtx());
     G.touchMode = isTouchDevice();
     G.ctl.bindPointer($('#view'), {
-      uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen || $('#help').style.display !== 'none',
+      uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen || (G.repair && G.repair.open) || $('#help').style.display !== 'none',
       key: onKey, keyUp: onKeyUp,
       mouseSeen: () => setInputMode('mouse'), keyboardSeen: () => { if (G.touch) setInputMode('mouse'); },
       lockChange: (on) => { if (on) setInputMode('mouse'); },
@@ -318,6 +326,7 @@ function cycleAirlock(out) {
 const PILOT_KEYS = 'wasdqeijkluox';
 function onKey(k, e) {
   if (G.chatOpen) return true;
+  if (G.repair && G.repair.open) return G.repair.key(k);
   if (G.panel.open && G.panelComp === 'helm' && PILOT_KEYS.includes(k) && k.length === 1) {
     if (k === 'x') { if (sasModes(G.S).includes('hold')) act('att.mode', { m: 'hold' }); else G.hud.toast('No SAS on this difficulty: counter the rotation by hand', 'warn'); }
     return true;
@@ -351,7 +360,7 @@ function lockMouse() {
 function handleInteraction(dt) {
   const S = G.S, me = meView();
   if (!me) return;
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive';
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive' || (G.repair && G.repair.open);
   G.focus = blocked ? null : G.ctl.focus(S, me);
   const f = G.focus;
   if (input.use) {
@@ -377,14 +386,20 @@ function handleInteraction(dt) {
   if (!blocked && f && (input.repair || input.item) && G.workT <= 0) {
     G.workT = 0.25;
     const it = me.item;
-    if (input.repair && f.kind === 'comp') { act('work', { kind: 'repair', target: f.id }); G.sfx.play('repair'); }
+    if (input.repair && f.kind === 'comp') {
+      const need = repairNeeds(S, f.id);
+      if (need) { // a real fault: open the hands-on repair procedure
+        input.repair = false; G.workT = 0.6;
+        if (S.comps[f.id].fire > 0.05) G.hud.toast('Put the fire out first', 'warn');
+        else { const miss = missingParts(S, need.parts); if (miss.length) G.hud.toast(`Can't fix it yet — missing ${miss.join(', ')}. Fabricate them (Cargo deck) or buy them in port.`, 'warn'); else { G.ctl.releaseLock(); G.repair.start(f.id); } }
+      } else { act('work', { kind: 'repair', target: f.id }); G.sfx.play('repair'); }
+    }
     else if (input.item && it) {
       if (it.type === 'ext' && f.kind === 'comp') { act('work', { kind: 'ext', target: f.id }); G.sfx.play('hiss'); }
       else if (it.type === 'patch' && f.kind === 'breach') { act('work', { kind: 'patch', target: f.id }); G.sfx.play('repair'); }
       else if (it.type === 'patch' && f.kind === 'hull') { act('work', { kind: 'hull', target: 'hull' }); G.sfx.play('repair'); }
       else if (it.type === 'medkit') { act('work', { kind: 'medkit', target: f.kind === 'player' ? f.id : null }); input.item = false; }
       else if (it.type === 'cartridge' && f.kind === 'comp' && f.id === 'scrubbers') { act('work', { kind: 'cartridge', target: 'scrubbers' }); input.item = false; }
-      else if (it.type === 'spares' && f.kind === 'comp') { act('work', { kind: 'repair', target: f.id }); G.sfx.play('repair'); }
     }
   } else if (!blocked && !f && input.item && me.item && me.item.type === 'medkit' && G.workT <= 0) { G.workT = 0.5; act('work', { kind: 'medkit', target: null }); input.item = false; }
   if (G.touch) {
@@ -404,6 +419,7 @@ function handleFx(list) {
     G.ext.onFx(f);
     switch (f.type) {
       case 'log': logLocal(f.text, f.kind); if (f.kind === 'bad') G.sfx.play('shipwarn'); break;
+      case 'repaired': G.sfx.relay && G.sfx.relay(0.8); break;
       case 'dock': G.sfx.relayBank(6, 1.2, 1); G.sfx.play('hit'); if (G.world) G.world.shake = 0.5; break;
       case 'toast': if (f.to === G.myId) { G.hud.toast(f.text, 'warn'); G.sfx.play('warn'); } break;
       case 'hit': if (G.world) G.world.shake = me && me.deck === f.deck ? Math.min(1.6, 0.7 + f.power) : 0.35; G.sfx.play('hit'); break;
@@ -435,7 +451,7 @@ function frame(tms) {
   const me = S.players[G.myId];
   // teleports (respawn) from the host
   if (me && me.tp !== G.lastTp) { G.lastTp = me.tp; G.ctl.setFrom(me); }
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus;
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || (G.repair && G.repair.open);
   G.ctl.update(dt, S, me, blocked);
   if (G.role !== 'client') {
     if (me) { me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; me.pitch = G.ctl.pitch; me.fl = G.ctl.fl; }
@@ -477,6 +493,7 @@ function frame(tms) {
   } else if (G.pilotSent && G.pilotSent !== '0,0,0|0,0,0') { act('att.cmd', { r: [0, 0, 0], t: [0, 0, 0] }); G.pilotSent = ''; }
   if (G.panel.open) G.ext.render(S, rdt, now);
   if (G.tut) G.tut.tick(rdt);
+  if (G.repair && G.repair.open) { if (!me || me.state !== 'alive') G.repair.close(true); else G.repair.tick(rdt, now); }
   G.sfx.setConsoleHum(!!G.world.focus && G.world.focusT > 0.5);
   { let near = 0; const me2 = meView(); if (me2) for (const id in G.world.comps) { const v = G.world.comps[id]; if (v.canvas && v.wasLive && v.group.parent && v.group.parent.visible) { const p = v.group.position; if (Math.hypot(p.x - me2.x, p.z - me2.z) < 7) near++; } } G.sfx.idle(rdt, !!G.world.focus, near); }
   G.hudT -= dt;

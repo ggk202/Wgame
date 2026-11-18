@@ -1,5 +1,6 @@
 // DOM UI: widget builder for console panels, HUD, toasts, crew votes.
 import { COMPS, DECKS, WAYPOINTS, SHIP, ITEMS, EXT, EXT_DECK, RING_DECK, atmoDeck, deckName } from './config.js';
+import { PARTS, repairNeeds, missingParts } from './repair.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp } from './util.js';
 import { eff, heatFrac, deltaV, inShelter } from './sim.js';
 
@@ -171,7 +172,7 @@ export class PanelView {
         const c = S.comps[compId];
         if (!c) return '';
         let s = '';
-        if (c.hp <= 0) s = `<div class="offline bad">DESTROYED — repair with a Spare Parts Kit (hold R next to it)</div>`;
+        if (c.hp <= 0) s = `<div class="offline bad">DESTROYED — needs a repair procedure (press R next to it) and parts</div>`;
         else if (!c.on) s = `<div class="offline warn">Breaker OFF — reset at Power Distribution (Engineering)</div>`;
         else if (c.pw <= 0) s = `<div class="offline warn">NO POWER — load shed. Check Power Distribution.</div>`;
         if (COMPS[compId].computer && c.fault) s += `<div class="offline bad">SOFTWARE FAULT ${c.reboot > 0 ? `— rebooting ${Math.ceil(c.reboot)} s` : btn('Reboot (15 s)', 'reboot')}</div>`;
@@ -342,7 +343,7 @@ function promptFor(S, me, f, touch) {
     const c = S.comps[f.id];
     parts.push(`<b>${f.label}</b> <span class="${cls(c.hp, 60, 25)}">${Math.round(c.hp)}%</span>${c.fire > 0 ? ' <span class="bad">ON FIRE</span>' : ''}${c.fault ? ' <span class="bad">FAULT</span>' : ''}`);
     parts.push(K('E', COMPS[f.id].ext ? 'Inspect' : 'Use console'));
-    if (c.hp < 100 && c.fire <= 0.05) parts.push(K('R', it && it.type === 'spares' ? 'Repair (spare kit)' : c.hp <= 0 ? 'needs Spare Parts Kit' : 'Maintain (hold)'));
+    if (c.hp < 100 && c.fire <= 0.05) { const need = repairNeeds(S, f.id); if (need) { const miss = missingParts(S, need.parts); parts.push(K('R', `Repair: ${need.issues.map((i) => i.label).join(' + ')}`)); parts.push(miss.length ? `<span class="bad">missing ${miss.join(', ')}</span>` : `<span class="dim">uses ${Object.entries(need.parts).map(([k, n]) => `${n}× ${PARTS[k].short}`).join(' ')}</span>`); } else parts.push(K('R', 'Maintain (hold)')); }
     if (c.fire > 0 && it && it.type === 'ext') parts.push(K('F', 'Extinguish (hold)'));
     if (c.fire > 0 && (!it || it.type !== 'ext')) parts.push('<span class="warn">Get an extinguisher (emergency locker)</span>');
     if (f.id === 'scrubbers' && it && it.type === 'cartridge') parts.push(K('F', 'Swap cartridge'));

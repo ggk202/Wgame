@@ -6,6 +6,7 @@ import { startApproach, sasModes } from './attitude.js';
 import { fireRail, launchTorpedo, launchSRM, deployChaff, startEncounter, applyHit, addBreach } from './combat.js';
 import { castVote, pirateDemand, fireEvent } from './story.js';
 import { EVENTS } from './events.js';
+import { PARTS, PART_IDS, repairNeeds, missingParts, moduleOf } from './repair.js';
 
 const toast = (S, p, text) => fx(S, 'toast', { to: p.id, text });
 const dist2 = (p, x, z, y = 0) => Math.hypot(p.x - x, p.z - z, Math.max(0, Math.abs((p.y || 0) - y) - 1.2));
@@ -51,6 +52,23 @@ export function applyAction(S, pid, a, args = {}) {
       if (!it || p.item || it.deck !== p.deck || dist2(p, it.x, it.z) > 3) return;
       p.item = { type: it.type, charge: it.charge };
       S.items = S.items.filter((i) => i !== it); return;
+    }
+    case 'repair.complete': { // the minigame was finished: consume the parts and restore the module
+      const id = args.id, c = S.comps[id];
+      if (!c || !COMPS[id]) return;
+      if (!nearComp(p, id, 3.4)) return err('Too far away');
+      if (c.fire > 0.05) return err('Put the fire out first');
+      const need = repairNeeds(S, id);
+      if (!need) { if (c.hp < 100) c.hp = 100; return; }
+      if (args.key !== need.issues.map((i) => i.label).join('|')) return err('That fault was already dealt with');
+      const miss = missingParts(S, need.parts);
+      if (miss.length) return err(`Missing parts: ${miss.join(', ')}`);
+      for (const [k, n] of Object.entries(need.parts)) S.stores[k] -= n;
+      const was = c.hp;
+      c.hp = was <= 0 ? 70 : 100; c.issue = null; c.issue2 = null; c.dead = false;
+      log(S, `${p.name} repaired ${COMPS[id].name} (${need.issues.map((i) => i.label.toLowerCase()).join(', ')})${was <= 0 ? ' — back online at 70%' : ''}`, 'good');
+      fx(S, 'repaired', { id });
+      return;
     }
     case 'impact': { const v = clamp(+args.v || 0, 0, 30); if (v > 5.5 && p.state === 'alive' && !p.god) { p.hp -= (v - 5.5) * 9; log(S, `${p.name} hit ${p.deck === EXT_DECK ? 'the hull' : 'the deck'} hard (${v.toFixed(1)} m/s)`, 'warn'); fx(S, 'hit', { deck: p.deck, power: 0.2 }); } return; }
     case 'eva': log(S, args.out ? `${p.name} cycled out through the airlock for EVA` : `${p.name} is back inside`, 'info'); return;
@@ -219,7 +237,11 @@ export function applyAction(S, pid, a, args = {}) {
       if (S.drones.jobs.length >= S.drones.total) return err('All drones busy');
       if (S.drones.jobs.some((j) => j.target === args.target)) return err('Already being repaired');
       if (args.target === 'hull') { if (S.stores.patch <= 0) return err('Needs a hull patch in stores'); S.stores.patch--; }
-      else { if (!COMPS[args.target] || !COMPS[args.target].ext) return; if (S.stores.spares <= 0) return err('Needs a spare kit in stores'); S.stores.spares--; }
+      else {
+        if (!COMPS[args.target] || !COMPS[args.target].ext) return;
+        const need = repairNeeds(S, args.target);
+        if (need) { const miss = missingParts(S, need.parts); if (miss.length) return err(`Drone needs parts: ${miss.join(', ')}`); for (const [k, n] of Object.entries(need.parts)) S.stores[k] -= n; }
+      }
       S.drones.jobs.push({ target: args.target, t: 35 });
       log(S, `Drone dispatched: ${args.target === 'hull' ? 'hull plating' : COMPS[args.target].name}`, 'info'); return;
     }
@@ -248,14 +270,9 @@ function doWork(S, p, { kind, target }) {
     const c = S.comps[target];
     if (c.fire > 0.05) return err('Put the fire out first');
     if (c.hp >= 100) return;
-    if (it && it.type === 'spares') {
-      const amt = Math.min(4.5, 100 - c.hp);
-      c.hp += amt; it.charge -= amt * 1.6;
-      if (it.charge <= 0) { p.item = null; err('Spare parts kit used up'); }
-    } else {
-      if (c.hp <= 0) return err('Destroyed — needs a Spare Parts Kit (Stores, Cargo deck)');
-      c.hp = Math.min(100, c.hp + 0.9);
-    }
+    // light wear can still be tended by hand; real faults need the repair procedure (and parts)
+    if (c.issue !== null && c.issue !== undefined) return err(`${moduleOf(target).name}: ${repairNeeds(S, target).issues.map((i) => i.label).join(' + ')} — press R for the repair procedure`);
+    c.hp = Math.min(100, c.hp + 0.9);
     if (c.hp > 0 && c.dead) c.dead = false;
     return;
   }
@@ -310,7 +327,13 @@ function stationBuy(S, p, item) {
   S.credits -= pr.cost;
   const st = S.stores;
   switch (item) {
-    case 'spares': st.spares += 2; break;
+    case 'board': st.board += 4; break;
+    case 'wire': st.wire += 6; break;
+    case 'seal': st.seal += 6; break;
+    case 'bearing': st.bearing += 4; break;
+    case 'cell': st.cell += 4; break;
+    case 'filler': st.filler += 8; break;
+    case 'optic': st.optic += 2; break;
     case 'patch': st.patch += 2; break;
     case 'medkit': st.medkit += 2; break;
     case 'cartridge': st.cartridge += 2; break;
@@ -334,7 +357,7 @@ function debugAction(S, p, a, args) {
     case 'debug.event': fireEvent(S, args.id); break;
     case 'debug.heal': for (const q of Object.values(S.players)) { q.hp = 100; q.dose = 0; if (q.state !== 'alive' && q.state !== 'spectator') q.state = 'alive'; } break;
     case 'debug.repair': for (const id of COMP_IDS) { S.comps[id].hp = 100; S.comps[id].fire = 0; S.comps[id].fault = 0; } S.breaches = []; S.hull = 100; break;
-    case 'debug.resources': Object.assign(S.stores, { srm: 24, spares: 20, patch: 10, medkit: 10, cartridge: 6, feedstock: 500, missiles: 10, slugs: 40, pdcAmmo: 8000, chaff: 6 }); S.mass.rmass = SHIP.rmassMax; S.credits += 50; S.life.o2 = 1500; S.life.n2 = 3500; break;
+    case 'debug.resources': Object.assign(S.stores, { board: 20, wire: 20, seal: 20, bearing: 20, cell: 20, filler: 20, optic: 10, srm: 24, patch: 10, medkit: 10, cartridge: 6, feedstock: 500, missiles: 10, slugs: 40, pdcAmmo: 8000, chaff: 6 }); S.mass.rmass = SHIP.rmassMax; S.credits += 50; S.life.o2 = 1500; S.life.n2 = 3500; break;
     case 'debug.skip': if (S.nav.state === 'transit') { S.nav.x = S.nav.L * (args.f ?? 0.9); } break;
     case 'debug.arrive': if (S.nav.state === 'transit') { S.nav.x = S.nav.L - 1e8; S.nav.v = 0; } break;
     case 'debug.warp': S.settings.warpBase = clamp(+args.w || 420, 10, 20000); break;

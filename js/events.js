@@ -156,7 +156,7 @@ export const EVENTS = {
         S.mass.rmass = Math.max(0, S.mass.rmass - 90);
         if (chance(0.28)) { log(S, 'It was a trap! Pirates were hiding in the hauler\'s shadow!', 'bad'); startEncounter(S, 'pirates', 110 * S.settings.threat); }
         else {
-          S.credits += 25; S.stores.spares += 3; S.stores.medkit += 2;
+          S.credits += 25; S.stores.board += 2; S.stores.seal += 2; S.stores.bearing += 1; S.stores.medkit += 2;
           msg(S, 'MV Anansi', 'We owe you our lives, Wolfram. Take these spares, and the Belt Mutual reward is on its way to your account.', 2);
           log(S, 'Rescue complete: +25 credits, +3 spare kits, +2 medkits', 'good');
         }
@@ -168,16 +168,16 @@ export const EVENTS = {
     fire(S) {
       msg(S, 'Indie trader “Pelican”', 'Wolfram! We\'re on a near-parallel track. Want to do some business by drone?', 1);
       const opts = [];
-      if (S.credits >= 10) opts.push({ id: 'spares', label: 'Buy 4 spare kits (10 credits)' });
+      if (S.credits >= 10) opts.push({ id: 'spares', label: 'Buy a parts crate: cards, cells, bearings, seals (10 credits)' });
       if (S.stores.feedstock >= 80) opts.push({ id: 'torps', label: 'Trade 80 kg feedstock for 2 torpedoes' });
-      opts.push({ id: 'sell', label: 'Sell 2 spare kits (+7 credits)' });
+      opts.push({ id: 'sell', label: 'Sell 4 weld rods (+7 credits)' });
       opts.push({ id: 'no', label: 'No deal', default: true });
       startVote(S, 'trader', 'Trade offer', 'A small independent trader offers a drone-to-drone exchange.', opts);
     },
     resolve(S, opt) {
-      if (opt === 'spares' && S.credits >= 10) { S.credits -= 10; S.stores.spares += 4; log(S, 'Trade: +4 spare kits', 'good'); }
+      if (opt === 'spares' && S.credits >= 10) { S.credits -= 10; for (const k of ['board', 'cell', 'bearing', 'seal']) S.stores[k] += 2; log(S, 'Trade: +2 each of circuit cards, power cells, bearings and seals', 'good'); }
       else if (opt === 'torps' && S.stores.feedstock >= 80) { S.stores.feedstock -= 80; S.stores.missiles += 2; log(S, 'Trade: +2 torpedoes', 'good'); }
-      else if (opt === 'sell' && S.stores.spares >= 2) { S.stores.spares -= 2; S.credits += 7; log(S, 'Trade: sold 2 spare kits (+7 credits)', 'good'); }
+      else if (opt === 'sell' && S.stores.filler >= 4) { S.stores.filler -= 4; S.credits += 7; log(S, 'Trade: sold 4 weld rods (+7 credits)', 'good'); }
       else log(S, 'The trader drifts out of range.', 'info');
     },
   },
@@ -197,7 +197,7 @@ export const EVENTS = {
   supply_drone: {
     cat: 'opportunity', title: 'Supply courier', tension: 0, can: isTransit,
     fire(S) {
-      S.stores.spares += 2; S.stores.patch += 2; S.stores.medkit += 1;
+      S.stores.wire += 3; S.stores.filler += 3; S.stores.patch += 2; S.stores.medkit += 1;
       msg(S, 'Mission Control', `A courier drone carrying supplies has matched velocity with you. Fly safe. (Sent ${lagText(lightLag(S))} ago.)`, lightLag(S));
       log(S, 'Supply courier docked: +2 spare kits, +2 hull patches, +1 medkit', 'good');
     },
@@ -216,7 +216,7 @@ export const EVENTS = {
       if (opt !== 'yes') return;
       S.mass.rmass = Math.max(0, S.mass.rmass - 30);
       const n = data.loot || 1;
-      S.stores.spares += 2 * n; S.stores.feedstock += 60 * n; S.stores.missiles += n; S.credits += 8 * n;
+      S.stores.board += n; S.stores.cell += n; S.stores.optic += Math.ceil(n / 2); S.stores.feedstock += 60 * n; S.stores.missiles += n; S.credits += 8 * n;
       log(S, `Salvage recovered: +${2 * n} spare kits, +${60 * n} kg feedstock, +${n} torpedo, +${8 * n} credits`, 'good');
     },
   },
