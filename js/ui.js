@@ -1,5 +1,6 @@
 // DOM UI: widget builder for console panels, HUD, toasts, crew votes.
 import { COMPS, DECKS, WAYPOINTS, SHIP, ITEMS, EXT, EXT_DECK, RING_DECK, atmoDeck, deckName } from './config.js';
+import { podState, POD_CRADLE } from './crew.js';
 import { PARTS, repairNeeds, missingParts } from './repair.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp } from './util.js';
 import { eff, heatFrac, deltaV, inShelter } from './sim.js';
@@ -278,7 +279,10 @@ export class HUD {
       navLine = `→ ${dest.name.split(',')[0]} · ${fmtDist(rem)} · ${(N.v / 1000).toFixed(0)} km/s${eta > 0 && eta < 1e9 ? ` · ETA ${fmtGameTime(eta)}` : ''}`;
     } else if (N.state === 'docked') navLine = `DOCKED at ${WAYPOINTS[N.leg].name.split(',')[0]}`;
     else if (N.state === 'approach' && S.prox) navLine = `APPROACH ${Math.max(0, S.prox.p[2]).toFixed(0)} m · ${(-S.prox.v[2]).toFixed(2)} m/s · off-axis ${Math.hypot(S.prox.p[0], S.prox.p[1]).toFixed(1)} m`;
-    else navLine = N.state === 'orbit' ? `ORBIT — request approach at the helm` : `DOCKING: latches driving…`;
+    else if (N.state === 'capture' && N.cap) { const t = N.cap.tPe - N.cap.t; navLine = `CAPTURE — periapsis ${t > 0 ? 'T−' + Math.ceil(t) : 'T+' + Math.ceil(-t)} s · ${Math.round((N.cap.dvEff / N.cap.dvNeed) * 100)}% of capture Δv`; }
+    else if (N.state === 'rendezvous' && N.rv) navLine = `RENDEZVOUS ${(N.rv.d / 1000).toFixed(2)} km · closing ${N.rv.vc.toFixed(1)} m/s${N.slotT > 0 ? ` · slot ${Math.ceil(N.slotT)} s` : ''}`;
+    else if (N.state === 'orbit') navLine = (N.ecc || 0) > 0.08 ? `ORBIT e=${(N.ecc || 0).toFixed(2)} — circularise at periapsis` : `ORBIT — request approach at the helm`;
+    else navLine = `DOCKING: latches driving…`;
     const pw = S.power;
     const battPct = S.battery.charge / (pw.cap || SHIP.batteryMWh);
     const ab = S.alert;
@@ -298,11 +302,13 @@ export class HUD {
     const d = S.decks[atmoDeck(me.deck)], P = d.o2 + d.n2 + d.co2;
     const shelter = inShelter(me);
     let st = me.state === 'downed' ? `<div class="big bad">DOWN — ${Math.ceil(me.downT)} s until death. A crewmate needs a medkit.</div>`
-      : me.state === 'dead' ? `<div class="big bad">DEAD — ${S.pods > 0 ? 'thawing a backup crew member…' : 'no backup crew left'}</div>`
-        : me.state === 'spectator' ? `<div class="big">SPECTATING</div>` : '';
+      : me.state === 'dead' ? `<div class="big bad">DEAD — ${S.pods > 0 ? `thawing a backup crew member in ${Math.ceil(me.respawnT || 0)} s` : 'no backup crew left'}</div><div class="sl"><span>GHOST</span><b>${ghostLine(me)}</b></div>`
+        : me.state === 'spectator' ? `<div class="big">SPECTATING</div><div class="sl"><span>GHOST</span><b>${ghostLine(me)}</b></div>` : '';
     this.vit.innerHTML = `${st}
       <div class="sl"><span>HEALTH</span>${bar(me.hp / 100, cls(me.hp, 50, 25), `${Math.round(me.hp)} / ${Math.round(me.maxHp || 100)}`)}</div>
       ${me.suit ? `<div class="sl"><span>SUIT O₂</span>${bar(me.suitO2 / 300, cls(me.suitO2, 90, 30), Math.ceil(me.suitO2) + ' s')}</div>` : ''}
+      ${me.state === 'alive' ? `<div class="sl"><span>FATIGUE</span>${bar((me.fatigue || 0) / 100, cls(me.fatigue || 0, 70, 88, true), `${Math.round(me.fatigue || 0)}%${me.sleep ? ' · ASLEEP' : (me.fatigue || 0) > 70 ? ' · find a bunk (Habitation or the ring)' : ''}`)}</div>` : ''}
+      ${me.pod ? podLine(S, me) : ''}
       <div class="sl"><span>DOSE</span><b class="${cls(me.dose, 1, 3, true)}">${me.dose.toFixed(2)} Sv${shelter ? ' · SHELTERED' : ''}</b></div>
       <div class="sl"><span>HANDS</span><b>${me.item ? ITEMS[me.item.type].name + (me.item.type === 'ext' || me.item.type === 'spares' ? ` (${Math.max(0, Math.round(me.item.charge))}%)` : '') : '—'}</b></div>
       ${me.deck === EXT_DECK ? `<div class="sl"><span>EVA</span><b class="${me.suit ? 'warn' : 'bad'}">HARD VACUUM${me.suit ? '' : ' — NO SUIT!'}${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`
@@ -310,7 +316,8 @@ export class HUD {
       <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.5) ? 'bad' : ''}">${me.deck === RING_DECK ? `${S.ring.g.toFixed(2)} g spin${S.drive.g > 0.01 ? ` + ${S.drive.g.toFixed(2)} g thrust (floor tilts aft)` : ''}${S.ring.g < 0.04 && S.drive.g < 0.04 ? ' · FLOATING' : ''}` : `${S.drive.g.toFixed(2)} g${S.drive.g < 0.04 ? (me.deck === EXT_DECK ? ' · ZERO-G · JET PACK (Space/C up/down)' : ' · ZERO-G · FLOATING (Space/C up/down)') : ' THRUST — floors are down'}`}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK ? ` · tether ${Math.round((me.tether || 0) * 100)}% of ${EXT.tether} m · reels in above ${EXT.maxG} g` : ''}</b></div>`;
     document.body.classList.toggle('suited', !!me.suit && me.state === 'alive');
     // prompt
-    this.prompt.innerHTML = focus ? promptFor(S, me, focus, ctx.touch) : '';
+    if (ctx.ladder) this.prompt.innerHTML = `<b>On the trunk ladder</b> — ${ctx.touch ? 'stick up/down to climb · stick sideways at a deck to step off' : '<kbd>W</kbd>/<kbd>S</kbd> climb (look down to go down) · <kbd>Space</kbd>/<kbd>C</kbd> up/down · <kbd>A</kbd>/<kbd>D</kbd> at a deck to step off'}${ctx.ladderFloor ? ' · <b>landing</b>' : ''}`;
+    else this.prompt.innerHTML = focus ? promptFor(S, me, focus, ctx.touch) : '';
     // vignette
     const hurt = me.state === 'alive' ? 1 - me.hp / 100 : 1;
     const gv = clamp((S.drive.g - 1.8) / 2, 0, 1);
@@ -335,6 +342,16 @@ export class HUD {
   }
 }
 
+function ghostLine(me) {
+  const m = me.ghost || 'free';
+  return `${m === 'scout' ? 'SCOUT DRONE — boosts sensor locks & point defence while out' : m === 'cams' ? 'CAMERA NET — [ ] cycle' : 'FREE CAMERA'} · <kbd>V</kbd> change job`;
+}
+function podLine(S, me) {
+  const P = podState(S), dc = Math.hypot(P.x - POD_CRADLE.x, P.y - POD_CRADLE.y, P.z - POD_CRADLE.z);
+  const c = P.carry && (S.cargo || []).find((x) => x.id === P.carry);
+  const near = (S.cargo || []).filter((x) => x.id !== P.carry).map((x) => Math.hypot(x.x - P.x, x.y - P.y, x.z - P.z)).sort((a, b) => a - b)[0];
+  return `<div class="sl"><span>POD</span><b class="${S.drive.ignited ? 'bad' : ''}">${c ? `towing ${c.kind === 'drone' ? 'drone' : 'container'} · ` : ''}cradle ${dc.toFixed(0)} m${near ? ` · cargo ${near.toFixed(0)} m` : ''} · <kbd>F</kbd> ${c ? 'release / deliver' : 'grapple'} · <kbd>G</kbd> exit${S.drive.ignited ? ' · SHIP UNDER THRUST!' : ''}</b></div>`;
+}
 function promptFor(S, me, f, touch) {
   const K = (k, t) => (touch ? `<em>${t}</em>` : `<kbd>${k}</kbd> ${t}`);
   const it = me.item;
@@ -354,6 +371,10 @@ function promptFor(S, me, f, touch) {
   else if (f.kind === 'hull') parts.push(`<b>Hull plating</b> ${Math.round(S.hull)}%`, K('F', 'Weld plating (hold, uses the patch)'));
   else if (f.kind === 'item') parts.push(K('E', 'Pick up ' + f.label));
   else if (f.kind === 'breach') parts.push(`<b class="bad">Hull breach</b>`, it && it.type === 'patch' ? K('F', 'Patch (hold)') : '<span class="warn">Needs a Hull Patch (locker/stores)</span>');
+  else if (f.kind === 'bunk') { const who = Object.values(S.players).find((q) => q.sleep && q.sleep.bunk === f.id); parts.push(`<b>${f.label}</b>${who ? ` — ${esc(who.name)} asleep` : ''}`, K('E', 'Sleep')); }
+  else if (f.kind === 'bay') parts.push(`<b>${f.label}</b>`, K('E', 'Experiments'));
+  else if (f.kind === 'pod') parts.push(`<b>${f.label}</b>`, K('E', 'Board'));
+  else if (f.kind === 'spoke') parts.push(`<b>${f.label}</b>`, K('E', 'Climb to the hub'));
   else if (f.kind === 'player') {
     const p = S.players[f.id];
     parts.push(`<b>${f.label}</b> ${p.state === 'downed' ? '<span class="bad">DOWN</span>' : Math.round(p.hp) + ' hp'}`);

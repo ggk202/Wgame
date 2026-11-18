@@ -11,6 +11,53 @@ import { buildShipExterior, buildExtComp, EXT_CAMS, flashTex } from './ship.js';
 import { SL } from './hull.js';
 import { qrot, qconj } from './attitude.js';
 import { projBodyDir } from './combat.js';
+import { podState, POD_CRADLE } from './crew.js';
+
+// ---- small craft and cargo outside the hull ----
+function buildWorkPod() {
+  const g = new THREE.Group();
+  const white = mat(0xe8e6df, 0.45, 0.2), dark = mat(0x2b2f35, 0.6, 0.4), orange = mat(0xff7a2a, 0.5), glass = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.55 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16), white); body.scale.set(1, 0.95, 1.15); g.add(body);
+  const win = new THREE.Mesh(new THREE.SphereGeometry(1.0, 24, 12, -Math.PI * 0.35, Math.PI * 0.7, Math.PI * 0.28, Math.PI * 0.42), glass); win.scale.set(1.04, 1.0, 1.2); win.rotation.y = Math.PI; g.add(win);
+  const band = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.06, 8, 32), orange); band.rotation.x = Math.PI / 2; g.add(band);
+  for (const [x, y, z] of [[1, 0.6, 0.8], [-1, 0.6, 0.8], [1, -0.6, 0.8], [-1, -0.6, 0.8], [1, 0.6, -0.8], [-1, 0.6, -0.8], [1, -0.6, -0.8], [-1, -0.6, -0.8]]) { const q = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), dark); q.position.set(x * 0.85, y * 0.85, z * 0.85); g.add(q); }
+  // manipulator arm with a claw, under the window
+  const arm = new THREE.Group(); arm.position.set(0, -0.7, -0.9); g.add(arm);
+  const a1 = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.0, 10), dark); a1.rotation.x = Math.PI / 2 - 0.5; a1.position.set(0, -0.2, -0.4); arm.add(a1);
+  for (const s of [-1, 1]) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.35), orange); c.position.set(s * 0.12, -0.45, -0.9); c.rotation.y = s * 0.3; arm.add(c); }
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3020 })); lamp.position.set(0, 1.08, 0); g.add(lamp); g.userData.lamp = lamp;
+  g.userData.arm = arm;
+  return g;
+}
+function buildCradle() {
+  const g = new THREE.Group(), m = mat(0x9aa2aa, 0.5, 0.7), y = mat(0xe8c040, 0.5);
+  for (const s of [-1, 1]) { const r = new THREE.Mesh(new THREE.TorusGeometry(1.3, 0.08, 8, 24, Math.PI), m); r.rotation.y = Math.PI / 2; r.position.x = s * 0.6; r.rotation.z = Math.PI; g.add(r); }
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.2, 2.4), m); base.position.y = -1.35; g.add(base);
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.05, 0.3), y); strip.position.set(0, -1.22, 1.0); g.add(strip);
+  const lab = textSprite('WORK POD', { width: 1.2, size: 30 }); lab.position.set(0, -1.7, 0); g.add(lab);
+  return g;
+}
+function buildContainer(kind) {
+  const g = new THREE.Group();
+  if (kind === 'drone') {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 1.1), mat(0x6d7682, 0.5, 0.6)); g.add(b);
+    for (const [x, z] of [[0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.04, 6, 16), mat(0x2b2f35, 0.6)); r.rotation.x = Math.PI / 2; r.position.set(x, 0, z); g.add(r); }
+    const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3020 })); l.position.y = 0.32; g.add(l); g.userData.lamp = l;
+  } else {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, 4.0), mat(0x4a7aa8, 0.6, 0.3)); g.add(b);
+    for (const z of [-1.95, 1.95]) { const f = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 0.12), mat(0xd0d4d8, 0.5, 0.6)); f.position.z = z; g.add(f); }
+    const l = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd040 })); l.position.y = 1.3; g.add(l); g.userData.lamp = l;
+    const lab = textSprite('CARGO — UNCLAIMED', { width: 1.8, size: 30 }); lab.position.y = 1.9; g.add(lab);
+  }
+  return g;
+}
+function buildScoutDrone(color) {
+  const g = new THREE.Group();
+  const b = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), mat(0x30343a, 0.5, 0.5)); g.add(b);
+  const l = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color })); l.position.z = -0.4; g.add(l);
+  const lab = textSprite('SCOUT', { width: 0.6, size: 30, color }); lab.position.y = 0.9; g.add(lab);
+  return g;
+}
 
 export { textSprite, buildComp, buildFire, buildAvatar, buildShipExterior, buildExtComp, buildRingInterior, buildDeckInterior };
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -307,10 +354,24 @@ export class World {
   // ---------------- per-frame update ----------------
   update(S, me, dt, now, ctl) {
     if (!S || !me) return;
+    this._meId = me.id;
+    if (!this.cockpit) { // the inside of the work pod, around the pilot's head
+      const c = this.cockpit = new THREE.Group(), fm = new THREE.MeshBasicMaterial({ color: 0x3a4048 }), lm = new THREE.MeshBasicMaterial({ color: 0xff8a1e });
+      for (const [x, y, rz] of [[-0.55, 0, 0.2], [0.55, 0, -0.2]]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.025, 1.4, 0.025), fm); st.position.set(x * 1.15, y, -0.7); st.rotation.z = rz; c.add(st); }
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.025, 0.025), fm); top.position.set(0, 0.5, -0.72); c.add(top);
+      const dash = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.12, 0.3), fm); dash.position.set(0, -0.5, -0.62); dash.rotation.x = -0.5; c.add(dash);
+      for (const x of [-0.53, 0.53]) { const e = new THREE.Mesh(new THREE.BoxGeometry(0.005, 1.3, 0.005), lm); e.position.set(x * 1.13, 0, -0.68); e.rotation.z = x < 0 ? 0.2 : -0.2; c.add(e); }
+      for (let i = 0; i < 7; i++) { const l = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.015), i % 3 ? lm : new THREE.MeshBasicMaterial({ color: 0x40ff90 })); l.position.set(-0.18 + i * 0.06, -0.43, -0.55); l.rotation.x = -0.5; c.add(l); }
+      c.visible = false; this.camera.add(c);
+    }
+    this.cockpit.visible = !!me.pod && me.deck === EXT_DECK;
     const deck = me.deck;
     const r = Math.hypot(me.x, me.z);
     const nearTrunk = deck <= 4 && r < 6.5;
-    this.decks.forEach((g, i) => { g.visible = i === deck || (nearTrunk && i <= 4 && Math.abs(i - deck) === 1); });
+    // every pressurised deck is drawn whenever you are inside the hull stack, so you can look (and climb, or float)
+    // straight down the trunk to the drive deck; the ring and the exterior only when you are in them
+    void nearTrunk;
+    this.decks.forEach((g, i) => { g.visible = i === deck || (deck <= 4 && i <= 4); });
     const walking = ctl ? !ctl.fl : true;
     const bob = me.moving && walking && (me.y || 0) < 0.05 ? Math.sin(now * 9) * 0.035 : 0;
     const crouch = me.state === 'downed' ? -1.2 : 0;
@@ -460,7 +521,7 @@ export class World {
   // Station visible from the hull and cameras during approach / docked (ship body frame; our port is at the bow)
   updateStation(S, now) {
     const N = S.nav;
-    const near = N.state === 'orbit' || N.state === 'approach' || N.state === 'docking' || N.state === 'docked';
+    const near = N.state === 'orbit' || N.state === 'rendezvous' || N.state === 'approach' || N.state === 'docking' || N.state === 'docked';
     const wid = !near ? null : N.state === 'docked' ? WAYPOINTS[N.leg].id : WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
     if (wid !== this.stationId) {
       if (this.station) this.exterior.remove(this.station);
@@ -472,6 +533,7 @@ export class World {
     const q = new THREE.Quaternion(...(S.att.q || [0, 0, 0, 1])), qi = q.clone().invert();
     let rel = new THREE.Vector3(0, 0, -2000);
     if (N.state === 'approach' && S.prox) rel = new THREE.Vector3(-S.prox.p[0], -S.prox.p[1], -S.prox.p[2]);
+    else if (N.state === 'rendezvous' && N.rv) rel = new THREE.Vector3(0, 0, -Math.max(250, N.rv.d));
     else if (N.state === 'docking' || N.state === 'docked') rel.set(0, 0, 0);
     this.station.position.copy(PORT).add(rel.applyQuaternion(qi));
     this.station.quaternion.copy(qi);
@@ -598,6 +660,33 @@ export class World {
     }
     for (const id in this.torps) if (!seen.has(id)) { this.spaceFx.remove(this.torps[id].m); delete this.torps[id]; }
   }
+  // the work pod, its cradle, drifting cargo and the ghosts' scout drones (all in the ship frame, outside)
+  updateCraft(S, now) {
+    const ex = this.exterior, P = podState(S), meId = this._meId;
+    if (!this.cradle) { this.cradle = buildCradle(); this.cradle.position.set(POD_CRADLE.x, POD_CRADLE.y, POD_CRADLE.z); ex.add(this.cradle); this.podMesh = buildWorkPod(); ex.add(this.podMesh); this.cargoMeshes = {}; this.scouts = {}; }
+    this.podMesh.visible = P.at !== 'lost' && !(P.pilot && P.pilot === meId);
+    this.podMesh.position.set(P.x, P.y, P.z);
+    const pilot = P.pilot && S.players[P.pilot];
+    if (pilot) this.podMesh.rotation.set(0, (pilot.yaw || 0) + Math.PI, 0); else if (P.at === 'cradle') this.podMesh.rotation.set(0, Math.PI / 2, 0);
+    this.podMesh.userData.lamp.visible = Math.sin(now * 4) > 0;
+    const seen = new Set();
+    for (const c of S.cargo || []) {
+      seen.add(c.id);
+      let m = this.cargoMeshes[c.id]; if (!m) { m = this.cargoMeshes[c.id] = buildContainer(c.kind); ex.add(m); }
+      m.position.set(c.x, c.y, c.z); m.rotation.set(now * 0.05, now * 0.08 + c.id.length, 0);
+      if (P.carry === c.id) m.rotation.set(0, this.podMesh.rotation.y, 0);
+      m.userData.lamp.visible = Math.sin(now * 3 + c.x) > 0.3;
+    }
+    for (const id in this.cargoMeshes) if (!seen.has(id)) { ex.remove(this.cargoMeshes[id]); delete this.cargoMeshes[id]; }
+    const sc = new Set();
+    for (const p of Object.values(S.players)) {
+      if (!p.connected || p.id === meId || p.ghost !== 'scout' || (p.state !== 'dead' && p.state !== 'spectator') || p.deck !== EXT_DECK) continue;
+      sc.add(p.id);
+      let m = this.scouts[p.id]; if (!m) { m = this.scouts[p.id] = buildScoutDrone(p.color); ex.add(m); }
+      m.position.set(p.x, (p.y || 0) + EYE, p.z); m.rotation.y = (p.yaw || 0) + now * 0.2;
+    }
+    for (const id in this.scouts) if (!sc.has(id)) { ex.remove(this.scouts[id]); delete this.scouts[id]; }
+  }
   updateExterior(S, now, dt) {
     this._S = S;
     const ex = this.exterior;
@@ -610,6 +699,7 @@ export class World {
       w.userData.mat.emissive.setRGB(0.35 * hf * hf, 0.1 * hf * hf, 0.02 * hf);
     }
     this.updateThreats(S, dt, now);
+    this.updateCraft(S, now);
     // gatlings: each tracks its own target (a torpedo or drone it can see), spins up and fires tracer streams at it
     const W = S.weap || {}, fire = W.pdcFire || [0, 0, 0], tg = W.pdcTgt || [null, null, null];
     ['pdc1', 'pdc2', 'pdc3'].forEach((id, i) => {
@@ -798,9 +888,10 @@ export class World {
       const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-lean * Math.cos(a.phase * 0.2) * 0.4 - lean * 0.6, a.yaw + Math.PI, floating ? Math.sin(a.phase * 0.7) * 0.15 : 0, 'YXZ'));
       a.group.quaternion.multiply(tq);
       if (floating) a.group.position.y += Math.sin(now * 1.3 + p.id.length) * 0.03;
-      a.group.visible = p.deck === deck && p.state !== 'dead' && p.state !== 'spectator';
+      a.group.visible = (p.deck === deck || (p.deck <= 4 && deck <= 4)) && p.state !== 'dead' && p.state !== 'spectator' && !p.pod;
       a.setSuit(p.suit);
       a.item.visible = !!p.item; if (p.item) a.item.material.color.setHex(ITEMS[p.item.type].color);
+      if (p.sleep && p.state === 'alive') { a.group.rotateX(-Math.PI / 2); a.group.position.y += 0.5; }
       if (p.state === 'downed') { a.group.rotateX(-Math.PI / 2); a.label.material.color.setHex(Math.sin(now * 6) > 0 ? 0xff4040 : 0xffffff); }
       else a.label.material.color.setHex(0xffffff);
     }

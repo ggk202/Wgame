@@ -1,4 +1,5 @@
 // Local first-person controller, keyboard/mouse input and interaction targeting.
+import { BUNKS, bunkPos, BUNK_REACH, podState, POD, POD_CRADLE, SCOUT } from './crew.js';
 import { COMPS, COMP_IDS, LOCKERS, LIFT_A, ROOM_R, ROOM_H, DECK_H, SHAFT_R, RAIL_H, EYE, PLAYER_H, ITEMS, DECKS, EXT_DECK, EXT, AIRLOCK, RING, RING_DECK, G0 } from './config.js';
 import { polar, compPos, compDeck, clamp } from './util.js';
 import { hullSDF, hullPush, hullNormal } from './hull.js';
@@ -33,7 +34,7 @@ export class Controller {
     this.sens = 0.0022;
     this.keys = {};
   }
-  setFrom(p) { this.x = p.x; this.y = p.y || 0; this.z = p.z; this.deck = p.deck; this.yaw = p.yaw ?? this.yaw; this.vx = this.vy = this.vz = 0; }
+  setFrom(p) { this.ladder = false; this.x = p.x; this.y = p.y || 0; this.z = p.z; this.deck = p.deck; this.yaw = p.yaw ?? this.yaw; this.vx = this.vy = this.vz = 0; }
 
   // Mouse / trackpad / keyboard on any device (desktop, iPad with Magic Keyboard or mouse, Android, ...).
   bindPointer(canvas, hooks) {
@@ -110,15 +111,29 @@ export class Controller {
     this.yaw -= input.lookX * this.sens * prefs.sens;
     this.pitch = clamp(this.pitch - input.lookY * this.sens * prefs.sens * (prefs.invertY ? -1 : 1), -1.5, 1.5);
     input.lookX = 0; input.lookY = 0;
-    if (!me || me.state === 'dead') { this.moving = false; return; }
-    const still = blocked || me.state === 'downed';
+    if (!me) { this.moving = false; return; }
+    if (me.state === 'dead' || me.state === 'spectator') { // ghost jobs while waiting for the thaw
+      const fwd = blocked ? 0 : input.fwd, right = blocked ? 0 : input.right, up = blocked ? 0 : input.up;
+      if (me.ghost === 'scout' && this.deck === EXT_DECK) this.flyCraft(dt, S, fwd, right, up, SCOUT, false);
+      else if (me.ghost === 'cams') { this.moving = false; this.fl = true; }
+      else if (me.state === 'spectator' || me.ghost === 'free') this.spectate(dt, fwd, right, up);
+      else this.moving = false;
+      return;
+    }
+    const still = blocked || me.state === 'downed' || !!me.sleep;
+    // tired crew move slower
+    this.tired = me.fatigue > 70 ? clamp(1 - (me.fatigue - 70) / 100, 0.7, 1) : 1;
     const fwd = still ? 0 : input.fwd, right = still ? 0 : input.right, up = still ? 0 : input.up;
     const G = gravityAt(S, this.deck), gm = Math.hypot(G[0], G[1], G[2]);
     this.gm = gm;
     if (me.state === 'spectator') { this.spectate(dt, fwd, right, up); return; }
+    if (this.deck === EXT_DECK && me.pod) { this.flyCraft(dt, S, fwd, right, up, POD, true, G); return; }
     if (this.deck === EXT_DECK) { this.eva(dt, S, me, fwd, right, up, G); return; }
     const walk = gm >= WALK_G;
     this.fl = !walk;
+    if (!walk) this.ladder = false;
+    if (walk && this.ladder) { this.ladderStep(dt, fwd, right, up); this.constrainDeck(true); return; }
+    if (walk && this.tryLadder(fwd, right)) { this.ladderStep(dt, fwd, right, up); this.constrainDeck(true); return; }
     if (walk) this.walkStep(dt, S, me, fwd, right, G, gm);
     else this.floatStep(dt, S, me, fwd, right, up, G);
     if (this.deck === RING_DECK) this.constrainRing(walk); else this.constrainDeck(walk);
@@ -130,9 +145,49 @@ export class Controller {
     if (this.deck !== EXT_DECK && this.deck !== RING_DECK) { const rr = Math.hypot(this.x, this.z); if (rr > ROOM_R - 0.5) { this.x *= (ROOM_R - 0.5) / rr; this.z *= (ROOM_R - 0.5) / rr; } this.y = clamp(this.y, -1.2, ROOM_H - EYE - 0.2); }
   }
   lookVec() { const cp = Math.cos(this.pitch); return [-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp]; }
+  // ---- the trunk ladder: under thrust you climb between decks (the platform lift is the quick way) ----
+  // it runs up the far side of the shaft from the lift gate; walk into the railing there to swing onto it
+  ladderAngle() { return LIFT_A + 180; }
+  tryLadder(fwd, right) {
+    if (this.deck > 4 || (fwd <= 0.2 && !input.up)) return false;
+    const r = Math.hypot(this.x, this.z);
+    if (r > SHAFT_R + 0.75 || this.y > 0.3) return false;
+    const la = (this.ladderAngle() * Math.PI) / 180, lx = Math.sin(la), lz = -Math.cos(la);
+    const along = (this.x * lx + this.z * lz) / Math.max(0.01, r); // cos of angle from the ladder bearing
+    if (along < Math.cos((22 * Math.PI) / 180)) return false;
+    // moving toward the shaft?
+    const mx = -Math.sin(this.yaw) * fwd, mz = -Math.cos(this.yaw) * fwd;
+    if (fwd > 0.2 && (mx * this.x + mz * this.z) / Math.max(0.01, r) > -0.3) return false;
+    this.ladder = true; this.ladderSnap = 0;
+    this.vx = this.vy = this.vz = 0;
+    return true;
+  }
+  ladderStep(dt, fwd, right, up) {
+    const la = (this.ladderAngle() * Math.PI) / 180, rr = SHAFT_R - 0.62;
+    // ease onto the rungs, facing the ladder
+    const tx = Math.sin(la) * rr, tz = -Math.cos(la) * rr, k = Math.min(1, dt * 8);
+    this.x += (tx - this.x) * k; this.z += (tz - this.z) * k;
+    // W climbs the way you look (up unless you look down), S the other way; Space / C always up / down
+    let v = up + (Math.abs(fwd) > 0.2 ? Math.sign(fwd) * (this.pitch < -0.35 ? -1 : 1) : 0);
+    v = clamp(v, -1, 1) * (input.sprint ? 1.6 : 1.0);
+    this.vy = v; this.y += v * dt; this.vx = this.vz = 0;
+    this.moving = Math.abs(v) > 0.1;
+    // floors you can step off at: this deck's floor (y = 0)
+    const atFloor = Math.abs(this.y) < 0.35;
+    this.ladderFloor = atFloor;
+    if (atFloor && Math.abs(v) < 0.1) this.y += (0 - this.y) * Math.min(1, dt * 6); // settle at the landing
+    if (this.deck === 0 && this.y < 0) this.y = 0;
+    if (this.deck === 4 && this.y > 2.6 + 3.8 - PLAYER_H) this.y = 2.6 + 3.8 - PLAYER_H;
+    // A / D at a landing steps off onto the deck, outside the railing
+    if (atFloor && Math.abs(right) > 0.5) {
+      const out = SHAFT_R + 0.75;
+      this.x = Math.sin(la) * out; this.z = -Math.cos(la) * out; this.y = 0; this.ladder = false; this.vy = 0;
+      this.yaw = Math.atan2(-this.x, -this.z); // face away from the shaft
+    }
+  }
   walkStep(dt, S, me, fwd, right, G, gm) {
     const gG = gm / G0;
-    let speed = input.sprint ? 5.2 : 3.2;
+    let speed = (input.sprint ? 5.2 : 3.2) * (this.tired || 1);
     if (me.suit) speed *= 0.85;
     if (gG > 1.2) speed /= Math.sqrt(gG);
     if (gG < 0.3) speed *= 0.55 + gG * 1.5; // low gravity: long, careful strides
@@ -174,7 +229,7 @@ export class Controller {
   land(v) { if (v > 5.5 && this.onImpact) this.onImpact(v); }
   constrainDeck(walk) {
     const r = Math.hypot(this.x, this.z);
-    const trunk = r < SHAFT_R - 0.25;
+    const trunk = r < SHAFT_R - 0.25 || this.ladder;
     // the trunk is a 3 m open tube through every deck; between the decks it is a tunnel
     const eye = this.y + EYE, bottom = walk ? this.y : eye - 0.35, top = walk ? this.y + PLAYER_H : eye + 0.25;
     if (!trunk) {
@@ -182,14 +237,17 @@ export class Controller {
       if (top > ROOM_H && r > SHAFT_R - 0.25) { this.y -= top - ROOM_H; this.vy = Math.min(0, this.vy); }
       // safety railing round the trunk opening: knee-high to hip-high, you can float over it but not walk through it
       const railTop = RAIL_H;
-      if (bottom < railTop && r < SHAFT_R + 0.42) { const k = (SHAFT_R + 0.42) / Math.max(0.01, r); this.x *= k; this.z *= k; this.vx = 0; this.vz = 0; }
+      if (!this.ladder && bottom < railTop && r < SHAFT_R + 0.42) { const k = (SHAFT_R + 0.42) / Math.max(0.01, r); this.x *= k; this.z *= k; this.vx = 0; this.vz = 0; }
     } else {
       // inside the trunk: tunnel walls between decks; the decks above and below connect through it
       if (eye > ROOM_H || eye < 0) { const rr = Math.hypot(this.x, this.z), lim = SHAFT_R - 0.45; if (rr > lim) { this.x *= lim / rr; this.z *= lim / rr; } }
-      if (this.deck < 4 && this.y + EYE > DECK_H + 0.3) { this.deck++; this.y -= DECK_H; }
-      else if (this.deck > 0 && this.y < -0.6) { this.deck--; this.y += DECK_H; }
-      if (this.deck === 4 && top > ROOM_H + 2.6) { this.y -= top - (ROOM_H + 2.6); this.vy = Math.min(0, this.vy); } // bow docking hatch, sealed
-      if (this.deck === 0 && bottom < 0) { if (this.vy < 0) this.land(-this.vy); this.y = walk ? 0 : 0.35 - EYE; this.vy = Math.max(0, this.vy); }
+      // hand over to the deck above/below with a little hysteresis, so hovering at the boundary can't flicker
+      if (this.deck < 4 && this.y > DECK_H - 0.9) { this.deck++; this.y -= DECK_H; }
+      else if (this.deck > 0 && this.y < -1.1) { this.deck--; this.y += DECK_H; }
+      const top2 = walk ? this.y + PLAYER_H : this.y + EYE + 0.25; // after any handover
+      if (this.deck === 4 && top2 > ROOM_H + 2.6) { this.y -= top2 - (ROOM_H + 2.6); this.vy = Math.min(0, this.vy); } // bow docking hatch, sealed
+      const bottom2 = walk ? this.y : this.y + EYE - 0.35;
+      if (this.deck === 0 && bottom2 < 0 && !this.ladder) { if (this.vy < 0) this.land(-this.vy); this.y = walk ? 0 : 0.35 - EYE; this.vy = Math.max(0, this.vy); }
     }
     this.collideComps(eye);
     const rr = Math.hypot(this.x, this.z), maxR = ROOM_R - 0.55;
@@ -248,6 +306,33 @@ export class Controller {
     this.jetting = al > 0.1;
   }
 
+  // The work pod and the ghosts' scout drone: free flight with real momentum, no tether. The pod bumps off the hull
+  // (2 m clearance) and, like anyone outside, is pushed aft when the ship accelerates under it.
+  flyCraft(dt, S, fwd, right, up, P, hull, G) {
+    this.fl = true;
+    const f = this.lookVec(), r = [Math.cos(this.yaw), 0, -Math.sin(this.yaw)];
+    const a = [f[0] * fwd + r[0] * right, f[1] * fwd + up, f[2] * fwd + r[2] * right];
+    const al = Math.min(1, Math.hypot(a[0], a[1], a[2]));
+    const jet = P.jet * (input.sprint ? 1.8 : 1);
+    this.vx = (this.vx || 0) + a[0] * jet * dt; this.vy = (this.vy || 0) + a[1] * jet * dt; this.vz = (this.vz || 0) + a[2] * jet * dt;
+    if (G && G[2]) this.vz += G[2] * dt;
+    // attitude-hold thrusters bleed off drift when you let go of the stick
+    if (al < 0.1 && input.brake !== false) { const k = Math.exp(-0.9 * dt); this.vx *= k; this.vy *= k; this.vz *= k; }
+    const sp = Math.hypot(this.vx, this.vy, this.vz); if (sp > P.vmax) { const k = P.vmax / sp; this.vx *= k; this.vy *= k; this.vz *= k; }
+    const p = { x: this.x + this.vx * dt, y: this.y + EYE + this.vy * dt, z: this.z + this.vz * dt };
+    if (hull) {
+      const before = { ...p };
+      hullPush(p, 2.0);
+      if (Math.hypot(p.x - before.x, p.y - before.y, p.z - before.z) > 1e-4) {
+        const n = hullNormal(p.x, p.y, p.z), vn = this.vx * n[0] + this.vy * n[1] + this.vz * n[2];
+        if (vn < 0) { if (-vn > 4) this.land(-vn + 1.5); this.vx -= vn * n[0] * 1.3; this.vy -= vn * n[1] * 1.3; this.vz -= vn * n[2] * 1.3; }
+      }
+    } else hullPush(p, 0.8);
+    const d = Math.hypot(p.x, p.y, p.z); if (d > P.range) { const k = P.range / d; p.x *= k; p.y *= k; p.z *= k; }
+    this.x = p.x; this.y = p.y - EYE; this.z = p.z;
+    this.moving = al > 0.1; this.jetting = al > 0.1; this.speed = sp;
+  }
+
   // Interaction target: the thing in front of the player within reach (3D: floating crew can reach from above)
   focus(S, me) {
     if (!S || !me) return null;
@@ -274,7 +359,8 @@ export class Controller {
     if (D === RING_DECK) {
       const C = 2 * Math.PI * RING.R;
       for (const a of RING.spokes) { let z = (a / 360) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'spoke', id: 'spoke', label: 'Spoke ladder to the hub' }, 0, RING.H - 0.3, z, 3.2, 1.2); }
-      for (let i = 0; i < RING.bays; i++) { let z = ((i + 0.5) / RING.bays) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; for (const s of [-1, 1]) consider({ kind: 'bay', id: 'bay' + (i * 2 + (s > 0 ? 1 : 0)), label: `Science Bay ${i * 2 + (s > 0 ? 2 : 1)} (empty)` }, s * (RING.W / 2 - 0.4), 1.2, z, 2.4); }
+      for (let i = 0; i < RING.bays; i++) { let z = ((i + 0.5) / RING.bays) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; for (const s of [-1, 1]) { const bid = 'bay' + (i * 2 + (s > 0 ? 1 : 0)), run = S.sci && S.sci.bays[bid]; consider({ kind: 'bay', id: bid, label: `Science Bay ${i * 2 + (s > 0 ? 2 : 1)}${run ? ' — ' + Math.round(run.p * 100) + '%' : ' (empty)'}` }, s * (RING.W / 2 - 0.4), 1.2, z, 2.4); } }
+      for (const b of BUNKS) if (b.deck === RING_DECK) { let z = b.z; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'bunk', id: b.id, label: b.label }, b.x, 0.5, z, BUNK_REACH + 0.6, 0.9); }
       return best;
     }
     for (const b of S.breaches) if (b.deck === D) { const p = polar(b.a, ROOM_R - 0.4); consider({ kind: 'breach', id: b.id, label: 'Hull breach' }, p.x, b.y || 1.2, p.z, 3.4, 0.6); }
@@ -285,10 +371,18 @@ export class Controller {
       consider({ kind: 'comp', id, label: c.name }, p.x, (p.y || 0) + (c.ext ? 0.6 : 1.1), p.z, c.fp + (c.ext ? 2.6 : 2.3), c.ext ? 0.9 : 0.6);
     }
     if (D === EXT_DECK) {
+      const P = podState(S);
+      if (me.pod) { // in the pod: the arm reaches further, and cargo is grappled with F
+        best = null; bestScore = Infinity;
+        for (const id of COMP_IDS) { const c = COMPS[id]; if (!c.ext) continue; const p = compPos(id); consider({ kind: 'comp', id, label: c.name }, p.x, (p.y || 0) + 0.6, p.z, c.fp + POD.reach, 0.7); }
+        return best;
+      }
+      if (P.at !== 'lost' && !P.pilot) consider({ kind: 'pod', id: 'pod', label: P.at === 'cradle' ? 'Work pod (in its cradle)' : 'Work pod' }, P.x, P.y, P.z, 4.2, 1.0);
       consider({ kind: 'hatch', id: 'hatch', label: 'Airlock hatch' }, EXT.hatch.x, EXT.hatch.y, EXT.hatch.z, 3.2, 0.9);
       if (!best && me.item && me.item.type === 'patch' && S.hull < 100 && hullSDF(this.x, this.y + EYE, this.z) < 2.2) best = { kind: 'hull', id: 'hull', label: 'Hull plating', d: 1 };
       return best;
     }
+    for (const b of BUNKS) if (b.deck === D) { const bp = bunkPos(b); consider({ kind: 'bunk', id: b.id, label: b.label }, bp.x, 1.0, bp.z, BUNK_REACH + 0.6, 0.8); }
     if (D === AIRLOCK.deck) { const ap = polar(AIRLOCK.a, ROOM_R - 0.4); consider({ kind: 'airlock', id: 'airlock', label: 'Airlock' }, ap.x, 1.2, ap.z, 2.8); }
     const lk = LOCKERS.find((l) => l.deck === D);
     if (lk) { const lp = polar(lk.a, lk.r); consider({ kind: 'locker', id: 'locker', label: 'Emergency Locker' }, lp.x, 1.2, lp.z, 2.6); }

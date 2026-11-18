@@ -7,6 +7,9 @@ import { fireRail, launchTorpedo, launchSRM, deployChaff, startEncounter, applyH
 import { castVote, pirateDemand, fireEvent } from './story.js';
 import { EVENTS } from './events.js';
 import { PARTS, PART_IDS, repairNeeds, missingParts, moduleOf } from './repair.js';
+import { beginRendezvous, ORBIT } from './flight.js';
+import { BUNKS, bunkPos, BUNK_REACH, EXPERIMENTS, SCI_COST, BAY_IDS, replyHail, podState, POD, POD_CRADLE, deliverCargo, SCOUT } from './crew.js';
+import { EXT, AIRLOCK } from './config.js';
 
 const toast = (S, p, text) => fx(S, 'toast', { to: p.id, text });
 const dist2 = (p, x, z, y = 0) => Math.hypot(p.x - x, p.z - z, Math.max(0, Math.abs((p.y || 0) - y) - 1.2));
@@ -30,7 +33,16 @@ export function applyAction(S, pid, a, args = {}) {
   if (a === 'vote') { castVote(S, pid, args.opt); return; }
   if (a === 'chat') return;
   if (a.startsWith('debug.')) return debugAction(S, p, a, args);
+  if (a === 'ghost.mode') { // dead or spectating crew: free camera, a scout drone, or the external camera net
+    if (p.state !== 'dead' && p.state !== 'spectator') return;
+    const m = ['free', 'scout', 'cams'].includes(args.m) ? args.m : 'free';
+    p.ghost = m;
+    if (m === 'scout') Object.assign(p, { deck: EXT_DECK, x: EXT.hatch.x + 6, y: EXT.hatch.y + 4, z: EXT.hatch.z, tp: p.tp + 1 });
+    else if (m === 'free' && p.deck === EXT_DECK) Object.assign(p, { deck: 3, x: 0, y: 0, z: 3, tp: p.tp + 1 });
+    return;
+  }
   if (p.state !== 'alive') return;
+  if (p.sleep && a !== 'wake') return; // asleep: nothing until you wake
   const err = (t) => toast(S, p, t);
   const R = S.reactor, D = S.drive, N = S.nav, W = S.weap;
 
@@ -40,6 +52,76 @@ export function applyAction(S, pid, a, args = {}) {
 
     // ----- physical work (sent repeatedly while holding the key; each call = 0.25 s of work) -----
     case 'work': return doWork(S, p, args);
+
+    // ----- sleep -----
+    case 'sleep': {
+      const b = BUNKS.find((x) => x.id === args.bunk);
+      if (!b || b.deck !== p.deck) return;
+      const bp = bunkPos(b); if (Math.hypot(p.x - bp.x, p.z - bp.z) > BUNK_REACH + 1) return err('Too far from the bunk');
+      if (Object.values(S.players).some((q) => q !== p && q.sleep && q.sleep.bunk === b.id)) return err('Someone is asleep in that bunk');
+      if (S.alert === 'red') return err('Not with the alarm going');
+      if ((p.fatigue || 0) < 15) return err('You are not tired');
+      p.sleep = { bunk: b.id, t: 0 }; p.seat = null; p.work = null;
+      log(S, `${p.name} turns in (${b.label})`, 'info'); return;
+    }
+    case 'wake': if (p.sleep && !(p.sleep.forced && p.sleep.t < 10)) p.sleep = null; return;
+
+    // ----- science (ring bays) -----
+    case 'sci.start': {
+      const ex = EXPERIMENTS[args.ex];
+      if (!ex || !BAY_IDS.includes(args.bay) || p.deck !== RING_DECK) return;
+      S.sci = S.sci || { bays: {}, done: {} };
+      if (S.sci.bays[args.bay]) return err('That rack is busy');
+      if (Object.values(S.sci.bays).some((r) => r && r.ex === args.ex)) return err('That experiment is already running in another bay');
+      if ((S.stores.feedstock || 0) < SCI_COST.feedstock) return err(`Needs ${SCI_COST.feedstock} kg of fabricator feedstock for the payload`);
+      S.stores.feedstock -= SCI_COST.feedstock;
+      S.sci.bays[args.bay] = { ex: args.ex, p: 0, by: p.name };
+      log(S, `${p.name} started ${ex.name} in ${args.bay.replace('bay', 'science bay ')}`, 'info'); return;
+    }
+    case 'sci.stop': if (S.sci && S.sci.bays[args.bay] && p.deck === RING_DECK) { S.sci.bays[args.bay] = null; log(S, 'Experiment aborted', 'warn'); } return;
+
+    // ----- comms -----
+    case 'comms.reply':
+      if (!at(S, p, ['comms', 'helm'])) return;
+      if (!replyHail(S, args.id, args.opt)) return err('Cannot reply to that');
+      log(S, `${p.name}: reply transmitted`, 'info'); return;
+
+    // ----- the work pod -----
+    case 'pod.board': {
+      const P = podState(S);
+      if (p.deck !== EXT_DECK || P.at === 'lost' || P.pilot) return;
+      if (Math.hypot(p.x - P.x, (p.y || 0) + 1.6 - P.y, p.z - P.z) > 4.5) return err('Get closer to the pod');
+      P.pilot = p.id; P.at = 'out'; p.pod = true; p.item = p.item || null;
+      Object.assign(p, { x: P.x, y: P.y - 1.0, z: P.z, tp: p.tp + 1 });
+      log(S, `${p.name} boards the work pod`, 'info'); return;
+    }
+    case 'pod.exit': {
+      const P = podState(S);
+      if (P.pilot !== p.id) return;
+      const dc = Math.hypot(P.x - POD_CRADLE.x, P.y - POD_CRADLE.y, P.z - POD_CRADLE.z);
+      const dh = Math.hypot(P.x - EXT.hatch.x, P.y - EXT.hatch.y, P.z - EXT.hatch.z);
+      if (dc > POD.deliver && dh > EXT.tether - 5) return err('Too far from the hatch to clip on a tether. Fly back first.');
+      if (dc <= POD.deliver) {
+        if (P.carry) { const c = (S.cargo || []).find((x) => x.id === P.carry); P.carry = null; if (c) deliverCargo(S, c); }
+        P.at = 'cradle'; Object.assign(P, { x: POD_CRADLE.x, y: POD_CRADLE.y, z: POD_CRADLE.z, vz: 0 });
+      }
+      P.pilot = null; p.pod = false;
+      Object.assign(p, { x: P.x + 1.6, y: P.y - 1.6, z: P.z, tp: p.tp + 1 });
+      log(S, `${p.name} leaves the work pod${P.at === 'cradle' ? ' (docked in its cradle)' : ''}`, 'info'); return;
+    }
+    case 'pod.grab': {
+      const P = podState(S);
+      if (P.pilot !== p.id) return;
+      if (P.carry) {
+        const c = (S.cargo || []).find((x) => x.id === P.carry); P.carry = null;
+        if (c && Math.hypot(P.x - POD_CRADLE.x, P.y - POD_CRADLE.y, P.z - POD_CRADLE.z) <= POD.deliver) deliverCargo(S, c);
+        else if (c) { c.vz = 0; toast(S, p, 'Released'); }
+        return;
+      }
+      const c = (S.cargo || []).map((x) => ({ x, d: Math.hypot(x.x - P.x, x.y - P.y, x.z - P.z) })).sort((a, b) => a.d - b.d)[0];
+      if (!c || c.d > POD.grab) return err('Nothing within reach of the arm');
+      P.carry = c.x.id; log(S, `${p.name} grapples the ${c.x.kind === 'drone' ? 'damaged drone' : 'container'}. Bring it to the pod cradle by the EVA hatch.`, 'good'); return;
+    }
 
     // ----- items -----
     case 'item.drop':
@@ -56,7 +138,7 @@ export function applyAction(S, pid, a, args = {}) {
     case 'repair.complete': { // the minigame was finished: consume the parts and restore the module
       const id = args.id, c = S.comps[id];
       if (!c || !COMPS[id]) return;
-      if (!nearComp(p, id, 3.4)) return err('Too far away');
+      if (!nearComp(p, id, p.pod ? POD.reach : 3.4)) return err('Too far away');
       if (c.fire > 0.05) return err('Put the fire out first');
       const need = repairNeeds(S, id);
       if (!need) { if (c.hp < 100) c.hp = 100; return; }
@@ -99,7 +181,7 @@ export function applyAction(S, pid, a, args = {}) {
     // ----- helm -----
     case 'helm.ignite':
       if (!at(S, p, ['helm', 'drivectl', 'drivecore'])) return;
-      if (N.state !== 'transit') return err('Undock first');
+      if (!['transit', 'capture', 'orbit', 'rendezvous'].includes(N.state)) return err(N.state === 'approach' ? 'Main drive locked out during proximity operations' : 'Undock first');
       if (S.comps.drivecore.hp <= 0) return err('Drive core destroyed');
       if (eff(S, 'injector') <= 0) return err('Pellet injector offline');
       if (S.mass.rmass <= 0) return err('No reaction mass');
@@ -123,12 +205,20 @@ export function applyAction(S, pid, a, args = {}) {
       if (!S.settings.autopilot) return err('No autopilot at this difficulty');
       if (eff(S, 'navcomp') <= 0) return err('Navigation computer offline');
       N.autopilot = !!args.on; log(S, `Autopilot ${N.autopilot ? 'ENGAGED' : 'disengaged'}`, 'info'); return;
+    case 'helm.manual':
+      if (!at(S, p, ['helm', 'navcomp'])) return;
+      N.manual = !!args.on; if (N.manual) N.autopilot = false;
+      log(S, N.manual ? `${p.name}: manual burns — the flight computer will advise, the pilot flies` : `${p.name}: burn advice off`, 'info'); return;
     case 'helm.evasive': if (!at(S, p, 'helm')) return; D.evasive = !!args.on; return;
     case 'helm.maneuver': if (!at(S, p, 'helm')) return; D.maneuver = ['hold', 'open', 'close'].includes(args.m) ? args.m : 'hold'; return;
     case 'helm.dock':
       if (!at(S, p, ['helm', 'comms'])) return;
       if (N.state !== 'orbit') return err('Not in orbit');
-      startApproach(S); return;
+      if (S.tutorial) { startApproach(S); return; }
+      if ((N.ecc || 0) > ORBIT.ecc) return err(`Orbit too eccentric (e=${(N.ecc || 0).toFixed(2)}). Burn retrograde at periapsis to circularise first.`);
+      if (N.holdT > 0) return err(`Traffic control: hold for ${Math.ceil(N.holdT)} s`);
+      if (N.trafficLate) { N.trafficLate = false; N.holdT = 120; log(S, 'Traffic control: no flight plan on file for Wolfram. Hold 2 minutes for slot allocation.', 'warn'); return; }
+      beginRendezvous(S); return;
     case 'helm.reapproach':
       if (!at(S, p, 'helm')) return;
       if (N.state !== 'approach') return;

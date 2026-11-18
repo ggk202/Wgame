@@ -44,7 +44,7 @@ export function sasModes(S) {
   const s = S.settings.sas;
   if (s === 'none') return ['off'];
   if (s === 'hold') return ['off', 'hold'];
-  return S.settings.difficulty === 'recruit' ? ['off', 'hold', 'pro', 'retro', 'target', 'dock'] : ['off', 'hold', 'pro', 'retro', 'target'];
+  return S.settings.difficulty === 'recruit' ? ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun', 'dock'] : ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun'];
 }
 
 // Target direction (inertial) for a SAS pointing mode
@@ -54,6 +54,8 @@ function sasTarget(S) {
   if (m === 'retro') return [0, 0, 1];
   if (m === 'target' && S.enc) { const e = S.enc.enemies.find((x) => x.id === S.sensors.lock && !x.dead && !x.gone); if (e) return e.dir; }
   if (m === 'dock') return [0, 0, -1];
+  if (m === 'shield' && S.att.sunDir) return [-S.att.sunDir[0], -S.att.sunDir[1], -S.att.sunDir[2]]; // stern (shadow shield, tanks) to the Sun
+  if (m === 'sun' && S.att.sunDir) return S.att.sunDir;
   return null;
 }
 

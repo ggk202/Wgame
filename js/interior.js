@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, RAIL_H, AIRLOCK, RING, EXT_DECK } from './config.js';
 import { polar } from './util.js';
+import { BUNKS } from './crew.js';
 import { PAL, mat, metal, emis, texMat, mliTex, rackTex, floorTex, grateTex, textSprite, planeLabel, buildComp, buildFire } from './models.js';
 
 // ---------------- textures ----------------
@@ -227,6 +228,11 @@ export function buildDeckInterior(d) {
     add(new THREE.PlaneGeometry(0.16, 0.12), accMat, cp.x * 1.04, 1.32, cp.z * 1.04, 0, Math.PI - ((LIFT_A + 28) * Math.PI) / 180, 0, trunk).userData.keep = true;
     void gp;
   }
+  { // the ladder gap in the railing: hazard bar and a sign
+    const la = LIFT_A + 180, lp = polar(la, SHAFT_R + 0.16);
+    add(new THREE.BoxGeometry(0.9, 0.08, 0.06), M.hazard, lp.x, RAIL_H - 0.02, lp.z, 0, -(la * Math.PI) / 180, 0, trunk);
+    const ls = planeLabel('LADDER ▲▼', 1.0, 0.2, { size: 44, accent: accHex }); const sp = polar(la, SHAFT_R + 0.2); ls.position.set(sp.x, RAIL_H + 0.22, sp.z); ls.rotation.y = Math.PI - (la * Math.PI) / 180; ls.userData.keep = true; g.add(ls);
+  }
   // deck signage on the trunk: what is up (nose) and down (drive) from here
   const sign = planeLabel(d.full, 2.6, 0.38, { size: 54, accent: accHex });
   const sp = polar(LIFT_A, SHAFT_R + 0.24); sign.position.set(sp.x, 1.62, sp.z); sign.rotation.y = Math.PI - (LIFT_A * Math.PI) / 180; sign.userData.keep = true; g.add(sign);
@@ -288,6 +294,20 @@ export function buildDeckInterior(d) {
     comps[id] = { ...built, fire, label };
   }
   bakeStatic(g);
+  if (d.id === 3) { // sleep stations: walk-in cubicles with a zip-up bag clipped to the wall for zero-g
+    const bagM = mat(0x3a5f8a, 0.85), padM = mat(0xd8d2c4, 0.9);
+    for (const b of BUNKS.filter((x) => x.deck === 3)) {
+      const st = new THREE.Group(); const p = polar(b.a, b.r); st.position.set(p.x, 0, p.z); st.rotation.y = Math.PI - (b.a * Math.PI) / 180; g.add(st);
+      add(new THREE.BoxGeometry(1.15, 2.3, 0.08), M.frame, 0, 1.15, -0.45, 0, 0, 0, st);
+      for (const x of [-0.56, 0.56]) add(new THREE.BoxGeometry(0.06, 2.3, 0.9), M.frame, x, 1.15, 0, 0, 0, 0, st);
+      add(new THREE.BoxGeometry(1.15, 0.08, 0.9), M.frame, 0, 2.3, 0, 0, 0, 0, st);
+      add(new THREE.BoxGeometry(1.0, 0.18, 0.75), padM, 0, 0.55, 0.0, 0, 0, 0, st); // fold-down cot for thrust
+      add(new THREE.CapsuleGeometry(0.24, 1.2, 6, 12), bagM, 0, 1.45, -0.28, 0, 0, 0, st); // zero-g sleeping bag on the wall
+      for (const y of [0.85, 2.05]) add(new THREE.BoxGeometry(0.5, 0.04, 0.04), M.rail, 0, y, -0.38, 0, 0, 0, st);
+      add(new THREE.BoxGeometry(0.16, 0.06, 0.06), emis(0xfff0c8, 1.2), 0.38, 2.1, -0.36, 0, 0, 0, st).userData.keep = true;
+      const lab = planeLabel(b.label.toUpperCase(), 0.9, 0.14, { size: 30 }); lab.position.set(0, 2.42, 0.47); lab.rotation.y = Math.PI; lab.userData.keep = true; st.add(lab);
+    }
+  }
   return { group: g, comps };
 }
 
@@ -376,6 +396,18 @@ export function buildRingInterior() {
   }
   // accent light strips where floor meets the walls
   for (const s of [-1, 1]) { const strip = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.02, R - 0.02, 0.05, SEGS, 1, true), new THREE.MeshBasicMaterial({ color: 0x6be675, side: THREE.BackSide })); strip.rotation.z = Math.PI / 2; strip.position.x = s * (W / 2 - 0.05); strip.userData.keep = true; g.add(strip); }
+  // bunks under the side windows: the best sleep on the ship, in spin gravity with the stars wheeling past
+  { const bunkM = mat(0x3d4d5e, 0.8), mattM = mat(0xd8d2c4, 0.9), pillowM = mat(0xeeeeea, 0.95), blanketM = mat(0x2f6a8a, 0.9);
+    for (const b of BUNKS.filter((x) => x.deck === RING.deck || x.id.startsWith('ring'))) {
+      const bk = new THREE.Group(); ringPlace(bk, b.x, 0, b.z); g.add(bk);
+      const o = (geo, m, x, y, zz) => { const q = new THREE.Mesh(geo, m); q.position.set(x, y, zz); bk.add(q); return q; };
+      o(new THREE.BoxGeometry(0.85, 0.32, 2.15), bunkM, 0, 0.16, 0);
+      o(new THREE.BoxGeometry(0.78, 0.12, 2.0), mattM, 0, 0.38, 0);
+      o(new THREE.BoxGeometry(0.8, 0.06, 1.3), blanketM, 0, 0.46, 0.3);
+      o(new THREE.BoxGeometry(0.5, 0.1, 0.3), pillowM, 0, 0.48, -0.78);
+      const lab = textSprite(b.label.toUpperCase(), { width: 0.9, size: 24, color: '#bfffbe' }); lab.position.set(0, 0.85, -1.0); bk.add(lab);
+    }
+  }
   // science bays: empty experiment racks with power/data/coolant stubs, benches and labels (payloads come later)
   for (let i = 0; i < RING.bays; i++) {
     const z = ((i + 0.5) / RING.bays) * C;

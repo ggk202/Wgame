@@ -268,8 +268,56 @@ export class Sfx {
       this.rec.stop();
     });
   }
-  tick(dt, alert, issue = false) {
+  // ---- main drive: the recorded engine, conducted through the thrust structure ----
+  // level 0..1 (throttle); the loop has 0.1 s margins either side, so the loop points stay seamless even if a
+  // decoder keeps the MP3 encoder delay (both points shift together)
+  engine(level, env) {
+    if (!this.ctx || !this.buf || !this.buf.engine) return;
+    const c = this.ctx, t = this.now();
+    if (!this._eng) {
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.7;
+      const pk = c.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = 70; pk.Q.value = 1; pk.gain.value = 5;
+      const g = c.createGain(); g.gain.value = 0;
+      lp.connect(pk); pk.connect(g); g.connect(this.master);
+      const d = this.buf.engine.duration;
+      const src = this.sample('engine', { loop: true, loopStart: 0.1, loopEnd: d - 0.1, offset: 0.1 + Math.random() * 4, dest: lp });
+      this._eng = { lp, g, src: src && src.src, lvl: 0 };
+    }
+    const e = this._eng, k = Math.max(0, Math.min(1, level));
+    // a smooth spool-up / spool-down rather than a switch
+    e.lvl = k; // the gain and pitch glide below give the spool-up
+    const v = e.lvl < 0.01 ? 0 : (0.18 + 0.5 * Math.sqrt(e.lvl)) * (env === 'eva' ? 0.45 : 1);
+    e.g.gain.setTargetAtTime(v, t, 0.25);
+    e.lp.frequency.setTargetAtTime((env === 'eva' ? 260 : 520) + 900 * e.lvl, t, 0.25);
+    if (e.src) e.src.playbackRate.setTargetAtTime(0.86 + 0.18 * e.lvl, t, 0.4);
+  }
+  // ---- torpedoes inbound: a dedicated, very urgent warble that speeds up as the nearest one closes ----
+  // n: inbound count; range: nearest range in km. Overrides the general-quarters klaxon while active.
+  inbound(dt, n, range) {
+    if (!n) { this.inT = 0; return false; }
+    this.inT = (this.inT || 0) - dt;
+    if (this.inT > 0) return true;
+    const close = Math.max(0, Math.min(1, 1 - range / 120)); // 120 km and out: slow; at the hull: frantic
+    const period = 0.62 - 0.4 * close;
+    this.inT = period;
+    const c = this.ctx, t = this.now(), dur = period * 0.8;
+    // two detuned square oscillators sweeping up hard, through a band-pass so it cuts through everything
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = 0.8;
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.012); g.gain.setValueAtTime(0.16, t + dur * 0.75); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    bp.connect(g); g.connect(this.master);
+    for (const det of [0, 7]) {
+      const o = c.createOscillator(); o.type = 'square';
+      o.frequency.setValueAtTime(880 + det, t); o.frequency.exponentialRampToValueAtTime(1760 + det * 2, t + dur * 0.7); o.frequency.setValueAtTime(880 + det, t + dur * 0.7);
+      o.connect(bp); o.start(t); o.stop(t + dur + 0.02);
+    }
+    // a sharp click at the start of each warble so it reads even on small speakers
+    this.click(0.5, 0, 3000);
+    if (n > 1) this.tone(2350, 0.05, 'square', 0.05, 0, dur * 0.85); // a pip per extra salvo: more pips = more incoming
+    return true;
+  }
+  tick(dt, alert, issue = false, threat = null) {
     if (!this.ctx || this.muted) return;
+    if (threat && this.inbound(dt, threat.n, threat.range)) { this.alarmT = Math.max(this.alarmT, 2); if (this.hum) this.hum.o.frequency.value = 52; return; }
     if (this.hum) this.hum.o.frequency.value = alert === 'red' ? 52 : 48;
     if (alert === 'red' || (issue && alert === 'yellow')) {
       this.alarmT -= dt;

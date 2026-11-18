@@ -3,6 +3,10 @@ import { COMPS, COMP_IDS, DECKS, WAYPOINTS, AU, C_LIGHT, SHIP } from './config.j
 import { clamp, rand, randi, chance, pick, weightedPick, log, fx, startVote, msg } from './util.js';
 import { eff, igniteComp, compsOnDeck } from './sim.js';
 import { startEncounter, applyHit, addBreach } from './combat.js';
+import { startChunk } from './flight.js';
+import { sendHail, spawnCargo, podState } from './crew.js';
+import { randDir, qrot } from './attitude.js';
+const bearingText = (S, d) => { const b = qrot([-S.att.q[0], -S.att.q[1], -S.att.q[2], S.att.q[3]], d); const parts = []; if (b[2] < -0.5) parts.push('ahead'); else if (b[2] > 0.5) parts.push('astern'); if (b[0] > 0.4) parts.push('starboard'); else if (b[0] < -0.4) parts.push('port'); if (b[1] > 0.4) parts.push('above'); else if (b[1] < -0.4) parts.push('below'); return parts.join(', ') || 'abeam'; };
 
 const internalIds = () => COMP_IDS.filter((id) => !COMPS[id].ext);
 const computerIds = () => COMP_IDS.filter((id) => COMPS[id].computer);
@@ -35,9 +39,36 @@ export const EVENTS = {
   debris_field: {
     cat: 'minor', title: 'Debris field', tension: 0.2, can: isTransit,
     fire(S) {
-      S.effects.debris = 45;
-      log(S, 'NAV WARNING: debris from a shattered rock crosses our track in 45 s. Evasive burn at the helm and active PDCs will reduce impacts.', 'warn');
+      S.effects.debris = 45; S.effects.debrisFrom = randDir(0.4);
+      log(S, `NAV WARNING: debris from a shattered rock crosses our track in 45 s, coming from ${bearingText(S, S.effects.debrisFrom)}. Turn the stern (shadow shield and tanks) into the stream, jink, and keep the PDCs active.`, 'warn');
       fx(S, 'alarm', { kind: 'warn' });
+    },
+  },
+  rock: {
+    cat: 'minor', title: 'Rock on intercept', tension: 0.25, can: (S) => isTransit(S) && !S.effects.chunk && !S.enc,
+    fire(S) { startChunk(S); },
+  },
+  hail_traffic: {
+    cat: 'flavor', title: 'Traffic control hail', tension: 0, can: (S) => isTransit(S) && S.nav.x / S.nav.L > 0.35 && !(S.comms && S.comms.hails.some((h) => h.kind === 'traffic' && h.leg === S.nav.leg)),
+    fire(S) { sendHail(S, 'traffic'); S.comms.hails[S.comms.hails.length - 1].leg = S.nav.leg; },
+  },
+  hail_distress: {
+    cat: 'opportunity', title: 'Distress call', tension: 0.05, can: isTransit,
+    fire(S) { sendHail(S, 'distress'); },
+  },
+  hail_customs: {
+    cat: 'minor', title: 'Customs pre-clearance', tension: 0.02, can: (S) => isTransit(S) && S.nav.leg >= 1,
+    fire(S) { sendHail(S, 'customs'); },
+  },
+  hail_medical: {
+    cat: 'flavor', title: 'Flight surgeon request', tension: 0, can: isTransit,
+    fire(S) { sendHail(S, 'medical'); },
+  },
+  salvage_container: {
+    cat: 'opportunity', title: 'Drifting container', tension: 0.05, can: (S) => !S.enc && !S.drive.ignited && podState(S).at !== 'lost' && (S.cargo || []).length < 2,
+    fire(S) {
+      const c = spawnCargo(S, 'container');
+      log(S, `Sensors: an unclaimed cargo container is drifting ${Math.round(Math.hypot(c.x, c.y, c.z))} m off our ${c.x > 0 ? 'starboard' : 'port'} side. Take the work pod out (EVA hatch, Cargo deck) and grapple it before we burn again. It will drift out of reach in 10 min.`, 'info');
     },
   },
   hull_fatigue: {
@@ -123,7 +154,7 @@ export const EVENTS = {
   },
   meteor_shower: {
     cat: 'major', title: 'Meteoroid stream', tension: 0.5, can: isTransit,
-    fire(S, pts) { S.effects.shower = clamp(Math.round(pts / 35), 3, 7); S.effects.showerT = 6; log(S, 'Crossing a dense meteoroid stream — multiple impacts expected!', 'bad'); fx(S, 'alarm', { kind: 'warn' }); },
+    fire(S, pts) { S.effects.shower = clamp(Math.round(pts / 35), 3, 7); S.effects.showerT = 14; S.effects.showerFrom = randDir(0.3); log(S, `Crossing a dense meteoroid stream from ${bearingText(S, S.effects.showerFrom)} — impacts in 14 s! Point the stern into the stream: the shadow shield and the cargo module can take it.`, 'bad'); fx(S, 'alarm', { kind: 'warn' }); },
   },
   reactor_crisis: {
     cat: 'major', title: 'Reactor crisis', tension: 0.5, can: (S) => S.reactor.state === 'running',

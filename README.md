@@ -111,6 +111,33 @@ You can repair the external systems by hand on EVA (`R` opens the repair procedu
 
 Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at the hatch), and weapon hits on external systems hurt crew nearby. Any thrust above 0.08 g sweeps you off the hull and the tether reels you in, injured. Repair drones remain the remote alternative.
 
+## Flying
+
+- **Arrival is a capture burn.** You come in on a hyperbolic path with a countdown to periapsis. Point retrograde (the attitude display shows a pulsing BURN marker) and burn inside the window. Burning off-centre wastes Δv (the Oberth effect). Too little leaves an eccentric orbit you must trim at a later periapsis, or a missed capture you have to turn round from.
+- **Rendezvous.** Requesting an approach puts you about 10 km from the station with a traffic-control slot (9 min) to reach soft capture. Burn toward the station, coast, and brake to arrive at the 200 m hold point below 3 m/s. Too fast and you get waved off; miss the slot and you're sent back to orbit with a fee. The autopilot flies a slow, safe profile; a good pilot is quicker.
+- **Manual burns.** At the helm or nav console, *Manual burns* makes the flight computer advise (direction, g, Δv to go) while a human flies it. Every departure and braking burn is scored for accuracy.
+- **Structural limits.** Thrust above 0.15 g with the centrifuge spinning, 0.45 g with radiators deployed, or 0.06 g with crew on EVA strains the ship. Things break if you keep it up. On Recruit the flight computer limits thrust for you.
+- **The Sun matters.** Radiators lose up to 55% of their output with sunlight on their faces, so turn them edge-on. In a proton storm, SAS *Stern to Sun* puts the shadow shield, tanks and drive between the crew and the protons (up to 85% less dose).
+- **Debris and rocks.** Debris fields and meteoroid streams come from a direction: stern-on, the shield takes most of it. A rock on an intercept course needs 1.6 m/s of sideways Δv before impact, from RCS translation or an off-axis burn.
+- **Combat geometry.** The helm's point-defence coverage map shows the sky from the bow, with each gatling's arc shaded and inbound threats marked. Roll and pitch to bring blind-spot threats into the light. Torpedoes coming straight at the side you show the enemy arrive fastest. Broadside presents a bigger target than nose-on.
+- **Pilot's log.** At the end of the voyage: Δv used per leg against the plan, burn scores, capture efficiency, rendezvous time and docking contact speed.
+
+## Crew life
+
+- **Fatigue and sleep.** Fatigue climbs while awake, faster at a console or working. Past 70% you slow down; past 88% you black out for moments; at 100% you collapse. Sleep in a Habitation sleep station or, better, a ring bunk under spin gravity. A red alert wakes everyone. When the whole crew sleeps in transit, time runs faster.
+- **Science.** Twelve ring bays take experiments, each using 15 kg of fabricator feedstock. Each experiment needs its own conditions: zero-g, a spin range, the drive burning, the nose on the Sun, a parking orbit, or a proton storm. They pay credits, and some unlock upgrades (better ring sleep, recycler, drive efficiency, radiator coating).
+- **Radio light-lag.** Stations, ships and Earth hail you with messages that arrive late. Your reply takes the same lag again, and must arrive before the deadline. Answer at the Comms console. These include traffic flight plans, distress calls, customs and medical requests.
+- **Cascading damage.** A fault left alone spreads:
+  - leaks dump heat into the ship;
+  - shorts start fires;
+  - HV faults drain the bus;
+  - seized bearings wear the module faster;
+  - cracks fatigue the hull.
+  An overheated engineering deck degrades the battery. Ship Status lists active cascades.
+- **The work pod.** A small pressurised craft in a cradle beside the EVA hatch. Board it on EVA with `E`. It flies four times harder than the jet pack and has no tether. `F` grapples and releases cargo, and `G` exits. Repairs work from 8 m. Bring back drifting salvage containers (parts and credits) and damaged drones before they drift away. Under thrust the ship leaves the pod behind.
+- **Ghost jobs.** Thawing a backup crew member takes 45 s. Meanwhile `V` switches between a free camera, a scout drone (it sharpens sensor locks and point defence while it is out) and the external camera net.
+- **All decks are drawn at once,** so you can look straight down the trunk. Under thrust, climb the trunk ladder through the hazard-striped gap in the railing.
+
 ## Repairs and parts
 
 Damaged modules develop a specific fault, chosen from the faults that module type can actually have. Press `R` at the module to open its **repair procedure**: a 3D workbench where you strip it down with a screwdriver (swappable bits), ratchet wrench (sockets), tweezers, wire cutters, insulating tape, a compact welder and a probe/multimeter. Pick a tool with `1–8`, change bit or socket with `B`, and hold the mouse (or your finger) on a part to work it.
@@ -123,6 +150,8 @@ There are six procedures:
 - **High voltage:** lock out the breaker and discharge the capacitor bank with the probe. Then swap the blown fuses or cells and restore power.
 - **Welding:** trace the welder along the whole crack, let the bead cool, then inspect it.
 - **Optics:** unbolt the damaged sensor head and seat a new one. Then turn the alignment knob until the signal peaks.
+
+**Repair practice** (main menu): pick any module, fault and difficulty and work it on the bench with unlimited parts, timed, with your best times kept.
 
 There is no universal spare kit any more. Each fault uses specific parts from stores: circuit cards, wiring looms, seals, bearings, HV cells/fuses, weld filler and optics. Fabricate parts on the Cargo deck, buy them in port or find them in salvage. A destroyed module has two faults to fix.
 

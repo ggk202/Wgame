@@ -2,7 +2,9 @@
 import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKERS, EXT_DECK, EXT, AIRLOCK, ROOM_R, RING, RING_DECK, atmoDeck } from './config.js';
 import { clamp, rand, randn, chance, pick, polar, compPos, log, fx } from './util.js';
 import { assignIssue } from './repair.js';
-import { updateCombat, updateWeapons } from './combat.js';
+import { updateCombat, updateWeapons, applyHit } from './combat.js';
+import { updateFlight, beginCapture, radiatorSunFactor, stormShield, safeG, pilotDock } from './flight.js';
+import { updateCrew, podState, spawnCargo } from './crew.js';
 import { storyStep, updateVote, updateEffects } from './story.js';
 import { updateAttitude, updateProx, startApproach, nose, sasModes, kick } from './attitude.js';
 import { legLength } from './state.js';
@@ -42,7 +44,11 @@ export function igniteComp(S, id, amount = 0.25) {
 export function step(S, dt) {
   if (S.phase !== 'play' || S.paused) return;
   S.t += dt;
-  S.warp = S.enc || S.nav.state !== 'transit' ? 1 : S.settings.warpBase;
+  S.warp = S.enc ? 1 : S.nav.state === 'transit' ? S.settings.warpBase : S.nav.state === 'rendezvous' ? 3 : 1;
+  // a quick reply is owed on the radio: keep time compression low enough that the light-lag plays out in minutes
+  if (S.warp > 30 && S.comms && S.comms.hails && S.comms.hails.some((h) => !h.done && h.urgent)) S.warp = 30;
+  // the whole crew asleep in transit: let the hours go by
+  if (S.nav.state === 'transit' && !S.enc && S.warp > 1) { const aw = Object.values(S.players).filter((p) => p.connected && p.state === 'alive'); if (aw.length && aw.every((p) => p.sleep)) S.warp *= 4; }
   const dtg = dt * S.warp;
   S.gameTime += dtg;
 
@@ -59,6 +65,7 @@ export function step(S, dt) {
   updateWeapons(S, dt);
   updateCombat(S, dt);
   updatePlayers(S, dt);
+  updateCrew(S, dt, dtg, { igniteComp, heatCap: SHIP.heatCap });
   updateWorkshops(S, dt);
   storyStep(S, dt);
   updateVote(S);
@@ -241,7 +248,7 @@ function updateHeat(S, dt) {
   for (const id of ['radA', 'radB']) {
     const c = S.comps[id];
     if (c.hp <= 0) continue;
-    out += (H.radExt ? SHIP.radExt : SHIP.radRet) * (0.3 + 0.7 * c.hp / 100) * (c.pw > 0 ? 1 : 0.6) * pumpF;
+    out += (H.radExt ? SHIP.radExt : SHIP.radRet) * (0.3 + 0.7 * c.hp / 100) * (c.pw > 0 ? 1 : 0.6) * pumpF * (H.radExt ? radiatorSunFactor(S) : 1) * (S.upg && S.upg.radCoat ? 1.1 : 1);
   }
   H.inMW = inMW; H.outMW = out;
   H.stored = clamp(H.stored + (inMW - out) * dt, 0, SHIP.heatCap * 1.15);
@@ -263,6 +270,7 @@ export function startFlip(S) {
   return null;
 }
 function onCapture(S, r) {
+  pilotDock(S, r); S.nav.slotT = null;
   S.nav.state = 'docking'; S.nav.dockT = 8; S.prox = null; S.att.q = [0, 0, 0, 1]; S.att.w = [0, 0, 0];
   log(S, `SOFT CAPTURE: lateral ${r.lateral.toFixed(2)} m, ${r.closing.toFixed(2)} m/s, ${r.ang.toFixed(1)}°, roll ${r.roll.toFixed(1)}°. Hard-dock latches driving…`, 'good');
   fx(S, 'dock');
@@ -283,7 +291,7 @@ function onCollide(S, r, hard) {
     fx(S, 'hit', { deck: 4, power: 0.2 });
   }
 }
-function autopilot(S, dt) {
+function autopilot(S, dt, advise = false) {
   const N = S.nav, D = S.drive;
   const rem = N.L - N.x;
   const dir = Math.sign(rem) || 1;
@@ -297,8 +305,13 @@ function autopilot(S, dt) {
   const dv = vDes - vToward;
   const dtg = dt * S.warp;
   const needOrient = dv >= 0 ? dir : -dir;
-  if (!D.ignited) { if (eff(S, 'drivecore') > 0 && S.mass.rmass > 0 && eff(S, 'injector') > 0) { D.ignited = true; log(S, 'Autopilot: drive ignition', 'info'); } else return; }
+  if (!D.ignited && !advise) { if (eff(S, 'drivecore') > 0 && S.mass.rmass > 0 && eff(S, 'injector') > 0) { D.ignited = true; log(S, 'Autopilot: drive ignition', 'info'); } else return; }
   const wantMode = needOrient > 0 ? 'pro' : 'retro';
+  if (advise) { // what the autopilot would do, for a human to fly
+    const burn = Math.abs(dv) >= aPlan * 2;
+    N.advice = { mode: wantMode, g: burn ? +gPlan.toFixed(2) : 0, dv: Math.round(Math.abs(dv)), burn, ok: !burn ? !D.ignited : D.ignited && D.orient === needOrient && Math.abs(D.cmdG - gPlan) < 0.06 };
+    return;
+  }
   if (Math.abs(dv) < aPlan * 2) { D.cmdG = 0; return; }
   if (S.att.mode !== wantMode) {
     if (D.orient !== needOrient && Math.abs(dv) <= aPlan * 120) { D.cmdG = 0; return; }
@@ -317,11 +330,19 @@ function updateDrive(S, dt, dtg) {
   D.along = along;
   D.flip = (S.att.mode === 'pro' || S.att.mode === 'retro') && S.att.err > 3 ? S.att.err : 0;
   if (prevOrient === 0 && D.orient !== 0 && N.state === 'transit') log(S, `Nose aligned ${D.orient > 0 ? 'PROGRADE' : 'RETROGRADE'}`, 'good');
-  if (N.state !== 'transit' && D.ignited) { D.ignited = false; D.cmdG = 0; }
-  if (N.state === 'transit' && N.autopilot && S.settings.autopilot && eff(S, 'navcomp') > 0 && eff(S, 'helm') > 0 && D.locked <= 0) autopilot(S, dt);
+  const FLY = N.state === 'transit' || N.state === 'capture' || N.state === 'orbit' || N.state === 'rendezvous';
+  if (!FLY && D.ignited) { D.ignited = false; D.cmdG = 0; }
+  N.advice = null;
+  if (N.state === 'transit' && eff(S, 'navcomp') > 0 && D.locked <= 0) {
+    if (N.manual) autopilot(S, dt, true); // manual burn mode: the computer only advises
+    else if (N.autopilot && S.settings.autopilot && eff(S, 'helm') > 0) autopilot(S, dt, false);
+  }
   const m = massKg(S);
   const maxA = SHIP.thrust / m;
-  D.want = D.ignited ? clamp((D.cmdG * G0) / maxA, 0, 1) : 0;
+  // Recruit: the flight computer holds thrust inside the structural limits for you
+  const capG = S.settings.difficulty === 'recruit' ? safeG(S) * 0.95 : 99;
+  D.capped = D.cmdG > capG;
+  D.want = D.ignited ? clamp((Math.min(D.cmdG, capG) * G0) / maxA, 0, 1) : 0;
   if (D.locked > 0) { D.locked -= dt; D.want = D.lockedThr; if (D.locked <= 0) log(S, 'Throttle valve freed', 'good'); }
   let thr = D.want;
   if (S.comps.drivecore.hp <= 0 || !D.ignited) thr = 0;
@@ -340,7 +361,8 @@ function updateDrive(S, dt, dtg) {
     N.v += along * a * dtg;
     N.x += N.v * dtg;
   }
-  const ve = SHIP.ve * (1 - 0.3 * M.contam);
+  updateFlight(S, dt, N.state === 'rendezvous' ? dtg : dt, along, a, { eff, applyHit, startApproach });
+  const ve = SHIP.ve * (1 - 0.3 * M.contam) * (S.upg && S.upg.drive ? 1.04 : 1);
   M.rmass -= ((F / ve) * dtg) / 1000 + (jink ? 0.02 * dt : 0) + (S.enc && D.maneuver !== 'hold' && D.ignited ? 0.03 * dt : 0);
   M.pellets = Math.max(0, M.pellets - 0.0003 * thr * dtg);
   M.rmass = Math.max(0, M.rmass);
@@ -348,9 +370,8 @@ function updateDrive(S, dt, dtg) {
   // arrival / docking
   const rem = N.L - N.x;
   if (N.state === 'transit' && Math.abs(rem) < 5e8 && Math.abs(N.v) < 6000) {
-    N.state = 'orbit'; N.v = 0; D.ignited = false; D.cmdG = 0;
-    log(S, `Arrived: holding orbit at ${WAYPOINTS[N.leg + 1].name}. Request an approach slot at the helm, then fly the docking by hand.`, 'good');
-    fx(S, 'chime');
+    if (S.tutorial) { N.state = 'orbit'; N.ecc = 0; N.v = 0; D.ignited = false; D.cmdG = 0; log(S, `Arrived: holding orbit at ${WAYPOINTS[N.leg + 1].name}.`, 'good'); fx(S, 'chime'); }
+    else beginCapture(S);
   }
   if (N.state === 'docking') {
     N.dockT -= dt;
@@ -392,13 +413,13 @@ function updateLife(S, dt, dtg) {
   const crew = Math.max(1, alivePlayers(S).length);
   L.food -= (1.8 / 86400) * crew * dtg;
   L.food += (eff(S, 'hydro') * 2.5 / 86400) * dtg;
-  L.water -= ((3 + 27 * (1 - eff(S, 'recycler'))) / 86400) * crew * dtg;
+  L.water -= ((3 + 27 * (1 - eff(S, 'recycler'))) * (S.upg && S.upg.recycler ? 0.5 : 1) / 86400) * crew * dtg;
   L.food = Math.max(0, L.food); L.water = Math.max(0, L.water);
 
   const hf = heatFrac(S);
   const counts = [0, 0, 0, 0, 0, 0];
   for (const p of alivePlayers(S)) counts[p.deck]++;
-  const stormRad = S.effects.stormT > 0 ? 30 * Math.min(1, S.effects.stormT / 10, (S.effects.stormLen - S.effects.stormT + 5) / 10) : 0;
+  const stormRad = S.effects.stormT > 0 ? 30 * Math.min(1, S.effects.stormT / 10, (S.effects.stormLen - S.effects.stormT + 5) / 10) * (1 - 0.85 * stormShield(S)) : 0;
   for (const d of S.decks) {
     if (d.ext) { d.o2 = 0; d.n2 = 0; d.co2 = 0; d.temp = -100; d.rad = 0.00008 + stormRad * 1.6; continue; }
     const k = S.breaches.filter((b) => b.deck === d.id).reduce((s, b) => s + b.size * 0.012, 0) + (d.vent ? 0.08 : 0);
@@ -433,7 +454,7 @@ function updateLife(S, dt, dtg) {
 
 // ---------- players ----------
 export function killPlayer(S, p, why) {
-  p.state = 'dead'; p.respawnT = 12; p.seat = null;
+  p.state = 'dead'; p.respawnT = 45; p.seat = null; p.sleep = null; p.pod = false;
   if (p.item) { S.items.push({ id: 'i' + Math.random().toString(36).slice(2, 8), type: p.item.type, charge: p.item.charge, deck: p.deck, x: p.x, z: p.z }); p.item = null; }
   log(S, `${p.name} has died${why ? ' — ' + why : ''}.`, 'bad');
   fx(S, 'death', { id: p.id });
@@ -538,6 +559,8 @@ function updateWorkshops(S, dt) {
   for (const j of Dr.jobs.filter((j) => j.t <= 0)) {
     if (j.target === 'hull') { S.hull = Math.min(100, S.hull + 6); log(S, 'Drones: hull plating patched (+6%)', 'good'); }
     else { S.comps[j.target].hp = Math.min(100, S.comps[j.target].hp + 50); log(S, `Drones: ${COMPS[j.target].name} repaired`, 'good'); }
+    // now and then a drone limps home damaged and has to be fetched with the work pod
+    if (!S.drive.ignited && !S.enc && Dr.total > 1 && chance(0.15) && podState(S).at !== 'lost') { Dr.total--; spawnCargo(S, 'drone'); log(S, 'A drone was clipped by debris on its way back and is drifting with a dead thruster. Fetch it with the work pod before it drifts out of range (7 min), or lose it.', 'warn'); }
   }
   Dr.jobs = Dr.jobs.filter((j) => j.t > 0);
   for (const t of S.weap.tubes) {

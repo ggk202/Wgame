@@ -14,8 +14,11 @@ import { Sfx } from './audio.js';
 import { ExtView } from './extview.js';
 import { sasModes } from './attitude.js';
 import { Tutorial } from './tutorial.js';
-import { RepairGame } from './minigame.js';
-import { repairNeeds, missingParts, PARTS } from './repair.js';
+import { RepairGame, fmtClock } from './minigame.js';
+import { repairNeeds, missingParts, PARTS, MODULES, PROCS } from './repair.js';
+import { ENEMY_TYPES } from './combat.js';
+import { podState } from './crew.js';
+import { EXT_CAMS } from './ship.js';
 
 const ART = !!window.WOLFRAM_ARTIFACT;
 const QS = (() => { try { return new URLSearchParams(location.search); } catch (e) { return new URLSearchParams(); } })();
@@ -60,6 +63,7 @@ function initLobby() {
   if (save) { try { const s = JSON.parse(save); $('#btn-continue').style.display = ''; $('#btn-continue').textContent = `Continue saved game (leg ${s.nav.leg + 1}, ${DIFFICULTY[s.settings.difficulty].name})`; } catch (e) {} }
 
   $('#btn-solo').onclick = () => { G.sfx.unlock(); startHost('solo', who(), createState(settings())); };
+  setupPractice();
   $('#btn-tutorial').onclick = () => {
     G.sfx.unlock();
     const S = createState({ difficulty: 'recruit', storyteller: 'halley', length: 'short' });
@@ -160,7 +164,7 @@ function hostOnMsg(pid, m) {
   }
   const p = S.players[pid];
   if (!p) return;
-  if (m.t === 'pos') { if (p.state !== 'dead') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, RING_DECK); p.yaw = m.y; } }
+  if (m.t === 'pos') { if (p.state !== 'dead' || p.ghost === 'scout') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, RING_DECK); p.yaw = m.y; } }
   else if (m.t === 'act') applyAction(S, pid, m.a, m.args || {});
   else if (m.t === 'chat') { const msg = { t: 'chat', from: p.name, color: p.color, text: String(m.text).slice(0, 200) }; G.net.broadcast(msg); showChat(msg); }
 }
@@ -327,6 +331,12 @@ const PILOT_KEYS = 'wasdqeijkluox';
 function onKey(k, e) {
   if (G.chatOpen) return true;
   if (G.repair && G.repair.open) return G.repair.key(k);
+  const me0 = G.S && G.S.players[G.myId];
+  if (me0 && me0.sleep && me0.state === 'alive' && (k === 'e' || k === ' ')) { act('wake'); return true; }
+  if (me0 && (me0.state === 'dead' || me0.state === 'spectator') && !G.panel.open) {
+    if (k === 'v') { const modes = ['free', 'scout', 'cams'], cur = me0.ghost || 'free', nx = modes[(modes.indexOf(cur) + 1) % modes.length]; act('ghost.mode', { m: nx }); if (nx === 'cams') ghostCam(0); else if (nx === 'free' && G.ctl.deck === EXT_DECK) { G.ctl.deck = 3; G.ctl.x = 0; G.ctl.z = 3; G.ctl.y = 0; } G.hud.toast(nx === 'scout' ? 'Scout drone: fly with WASD / Space / C. Your telemetry sharpens sensor locks and point defence.' : nx === 'cams' ? 'Camera net: [ and ] cycle cameras, mouse to look.' : 'Free camera', ''); return true; }
+    if ((me0.ghost === 'cams') && (k === '[' || k === ']')) { ghostCam((G.ghostCam || 0) + (k === ']' ? 1 : -1)); return true; }
+  }
   if (G.panel.open && G.panelComp === 'helm' && PILOT_KEYS.includes(k) && k.length === 1) {
     if (k === 'x') { if (sasModes(G.S).includes('hold')) act('att.mode', { m: 'hold' }); else G.hud.toast('No SAS on this difficulty: counter the rotation by hand', 'warn'); }
     return true;
@@ -361,23 +371,34 @@ function handleInteraction(dt) {
   const S = G.S, me = meView();
   if (!me) return;
   const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive' || (G.repair && G.repair.open);
+  if ((me.state === 'dead' || me.state === 'spectator') && G.touch) { // touch: USE cycles the ghost job, DROP the camera
+    if (input.use) { input.use = false; onKey('v'); }
+    if (input.drop) { input.drop = false; if (me.ghost === 'cams') onKey(']'); }
+    G.touch.setLabels({ use: 'GHOST JOB', repair: '', item: '', drop: me.ghost === 'cams' ? 'NEXT CAM' : '' });
+  }
   G.focus = blocked ? null : G.ctl.focus(S, me);
   const f = G.focus;
   if (input.use) {
     input.use = false;
     if (G.panel.open && G.touchMode) closePanel();
+    else if (me.pod && !blocked && !f) act('pod.exit');
     else if (f && !blocked) {
-      if (f.kind === 'comp') openPanel(COMPS[f.id].panel || 'extcomp', f.id);
+      if (me.pod && f.kind === 'comp') openPanel('extcomp', f.id);
+      else if (f.kind === 'comp') openPanel(COMPS[f.id].panel || 'extcomp', f.id);
       else if (f.kind === 'locker') openPanel('locker');
       else if (f.kind === 'lift') openPanel('lift');
       else if (f.kind === 'airlock') openPanel('airlock');
       else if (f.kind === 'hatch') openPanel('hatch');
       else if (f.kind === 'item') act('item.pickup', { id: f.id });
       else if (f.kind === 'spoke') rideLift(3);
-      else if (f.kind === 'bay') G.hud.toast(`${f.label}: an empty experiment rack with power, data and coolant hook-ups, waiting for a science payload.`, '');
+      else if (f.kind === 'bay') openPanel('science', f.id);
+      else if (f.kind === 'bunk') act('sleep', { bunk: f.id });
+      else if (f.kind === 'pod') act('pod.board');
     }
   }
   if (G.touch && G.touch.setFloat) G.touch.setFloat(G.ctl.fl || G.ctl.deck === EXT_DECK);
+  if (me.pod && input.item && !blocked && G.workT <= 0) { input.item = false; G.workT = 0.5; act('pod.grab'); }
+  if (input.drop && me.pod) { input.drop = false; act('pod.exit'); }
   if (input.drop) {
     input.drop = false;
     if (me.item && !blocked) { const fx = -Math.sin(G.ctl.yaw), fz = -Math.cos(G.ctl.yaw); act('item.drop', { x: G.ctl.x + fx * 0.8, z: G.ctl.z + fz * 0.8, y: G.ctl.fl ? G.ctl.y + 1.0 : 0 }); }
@@ -404,9 +425,9 @@ function handleInteraction(dt) {
   } else if (!blocked && !f && input.item && me.item && me.item.type === 'medkit' && G.workT <= 0) { G.workT = 0.5; act('work', { kind: 'medkit', target: null }); input.item = false; }
   if (G.touch) {
     G.touch.setLabels({
-      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : 'USE') : (G.panel.open ? 'CLOSE' : ''),
+      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : f.kind === 'bunk' ? 'SLEEP' : f.kind === 'pod' ? 'BOARD' : 'USE') : (me.pod ? 'EXIT POD' : G.panel.open ? 'CLOSE' : ''),
       repair: f && f.kind === 'comp' && S.comps[f.id].hp < 100 ? 'REPAIR' : '',
-      item: me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : 'REPAIR') : '',
+      item: me.pod ? (podState(S).carry ? 'RELEASE' : 'GRAB') : me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : 'REPAIR') : '',
       drop: me.item ? 'DROP' : '',
     });
   }
@@ -480,7 +501,10 @@ function frame(tms) {
   if (G.panel.open) G.panel.place(G.world.focusRect());
   document.body.classList.toggle('focused', !!G.world.focus);
   G.sfx.setEnv(G.ctl.deck === EXT_DECK ? 'eva' : 'inside');
-  G.sfx.tick(dt, S.alert, S.breaches.length > 0 || S.hull < 40 || S.reactor.state !== 'running' || Object.values(S.comps).some((c) => c.fire > 0 || c.hp <= 0));
+  let inb = null;
+  if (S.enc) { let n = 0, r = 1e9; for (const pr of S.enc.proj || []) if (pr.from === 'them' && pr.type === 'missile' && !pr.done) { n++; r = Math.min(r, pr.range); } for (const e of S.enc.enemies || []) if (!e.dead && !e.gone && ENEMY_TYPES[e.type] && ENEMY_TYPES[e.type].kamikaze) { n++; r = Math.min(r, e.range); } if (n) inb = { n, range: r }; }
+  G.sfx.tick(dt, S.alert, S.breaches.length > 0 || S.hull < 40 || S.reactor.state !== 'running' || Object.values(S.comps).some((c) => c.fire > 0 || c.hp <= 0), inb);
+  G.sfx.engine(S.drive.ignited ? Math.max(S.drive.throttle || 0, S.drive.g > 0.005 ? 0.15 : 0) : 0, G.ctl.deck === EXT_DECK ? 'eva' : 'inside');
   // hand controllers: keys + on-screen pads while seated at the helm
   if (G.panel.open && G.panelComp === 'helm' && G.world.focus) {
     const k = G.ctl.keys, P = G.pilotTouch, b = (x) => (k[x] ? 1 : 0), c = (x) => Math.max(-1, Math.min(1, x));
@@ -494,10 +518,11 @@ function frame(tms) {
   if (G.panel.open) G.ext.render(S, rdt, now);
   if (G.tut) G.tut.tick(rdt);
   if (G.repair && G.repair.open) { if (!me || me.state !== 'alive') G.repair.close(true); else G.repair.tick(rdt, now); }
+  updateSleepFx(me, rdt);
   G.sfx.setConsoleHum(!!G.world.focus && G.world.focusT > 0.5);
   { let near = 0; const me2 = meView(); if (me2) for (const id in G.world.comps) { const v = G.world.comps[id]; if (v.canvas && v.wasLive && v.group.parent && v.group.parent.visible) { const p = v.group.position; if (Math.hypot(p.x - me2.x, p.z - me2.z) < 7) near++; } } G.sfx.idle(rdt, !!G.world.focus, near); }
   G.hudT -= dt;
-  if (G.hudT <= 0) { G.hudT = 0.1; G.hud.update(S, meView(), G.focus, { act, touch: G.touchMode }); }
+  if (G.hudT <= 0) { G.hudT = 0.1; G.hud.update(S, meView(), G.focus, { act, touch: G.touchMode, ladder: G.ctl.ladder, ladderFloor: G.ctl.ladderFloor }); }
   G.panelT -= dt;
   if (G.panelT <= 0) { G.panelT = 0.2; G.panel.update(S); }
   $('#hint').style.display = !G.touchMode && !G.ctl.locked && !G.ctl.dragLook && !G.panel.open && !G.menuOpen && !G.chatOpen ? '' : 'none';
@@ -581,8 +606,118 @@ function showEnd(title, text, S) {
   $('#end-text').textContent = text || '';
   if (S) {
     $('#end-stats').innerHTML = `<div>Real time: <b>${fmtTime(S.t)}</b></div><div>Voyage time: <b>${(S.gameTime / 86400).toFixed(1)} days</b></div><div>Legs completed: <b>${S.nav.leg} / ${WAYPOINTS.length - 1}</b></div><div>Hostiles destroyed: <b>${S.stats.kills}</b></div><div>Hits taken: <b>${S.stats.hits}</b></div><div>Backup crew used: <b>${S.stats.podsUsed}</b></div><div>Difficulty: <b>${DIFFICULTY[S.settings.difficulty].name}</b> · Storyteller: <b>${STORYTELLERS[S.settings.storyteller].name}</b></div>`;
+    $('#end-stats').innerHTML += pilotReport(S);
     if (G.role !== 'client') store.set(SAVE_KEY, '');
   }
 }
 
 initLobby();
+
+// ---------------- ghost camera net ----------------
+function ghostCam(i) {
+  const n = EXT_CAMS.length; i = ((i % n) + n) % n; G.ghostCam = i;
+  const c = EXT_CAMS[i], d = [c.look[0] - c.pos[0], c.look[1] - c.pos[1], c.look[2] - c.pos[2]], l = Math.hypot(...d) || 1;
+  G.ctl.deck = EXT_DECK; G.ctl.x = c.pos[0]; G.ctl.y = c.pos[1] - 1.65; G.ctl.z = c.pos[2];
+  G.ctl.yaw = Math.atan2(-d[0], -d[2]); G.ctl.pitch = Math.asin(d[1] / l);
+  G.hud.toast(`Camera ${i + 1}/${n}: ${c.name}`, '');
+}
+// ---------------- sleep fade, exhaustion microsleeps ----------------
+function updateSleepFx(me, dt) {
+  const el = $('#sleepfx'); if (!el) return;
+  let target = 0, text = '';
+  if (me && me.state === 'alive' && me.sleep) { target = 0.92; text = me.sleep.forced ? 'You collapsed from exhaustion…' : `Asleep · fatigue ${Math.round(me.fatigue || 0)}% · ${G.touchMode ? 'tap USE' : 'press E or Space'} to wake`; }
+  else if (me && me.state === 'alive' && (me.fatigue || 0) > 88) { // eyelids
+    G.blinkT = (G.blinkT || 0) - dt;
+    if (G.blinkT <= 0) { G.blinkT = 6 + Math.random() * 10; G.blinkOn = 1.2 + Math.random(); }
+    if (G.blinkOn > 0) { G.blinkOn -= dt; target = 0.85; text = 'So tired… find a bunk'; }
+  }
+  G.sleepA = (G.sleepA || 0) + (target - (G.sleepA || 0)) * Math.min(1, dt * 2.5);
+  el.style.opacity = G.sleepA.toFixed(3); el.style.display = G.sleepA > 0.01 ? 'flex' : 'none';
+  el.textContent = text;
+}
+
+// ---------------- repair practice (main menu): the workbench on its own, unlimited parts, timed ----------------
+function setupPractice() {
+  const mods = Object.entries(MODULES).map(([mesh, m]) => ({ mesh, m, id: COMP_IDS.find((id) => COMPS[id].mesh === mesh) })).filter((x) => x.id);
+  const modSel = $('#pr-mod'), faultSel = $('#pr-fault'), diffSel = $('#pr-diff');
+  modSel.innerHTML = mods.map((x, i) => `<option value="${i}">${esc(x.m.name)}${COMPS[x.id].ext ? ' (exterior)' : ''}</option>`).join('');
+  diffSel.innerHTML = Object.entries(DIFFICULTY).map(([k, d]) => `<option value="${k}">${esc(d.name)}</option>`).join('');
+  let pr = {};
+  try { pr = JSON.parse(localStorage.getItem('wolfram-practice') || '{}'); } catch (e) { pr = {}; }
+  if (pr.diff) diffSel.value = pr.diff;
+  const best = pr.best || {};
+  const fillFaults = () => {
+    const x = mods[+modSel.value];
+    faultSel.innerHTML = x.m.issues.map((iss, i) => `<option value="${i}">${esc(iss.label)} · ${esc(PROCS[iss.proc].name)}</option>`).join('');
+    showInfo();
+  };
+  const jobKey = () => `${mods[+modSel.value].mesh}/${faultSel.value}/${diffSel.value}/${$('#pr-dead').checked ? 2 : 1}`;
+  const showInfo = () => {
+    const x = mods[+modSel.value], iss = x.m.issues[+faultSel.value] || x.m.issues[0];
+    const parts = Object.entries(iss.parts).map(([k, n]) => `${n}× ${PARTS[k].name.toLowerCase()}`).join(', ');
+    const b = best[jobKey()];
+    $('#pr-info').innerHTML = `Uses ${parts} on a real ship.${b ? ` · Your best: <b>${fmtClock(b)}</b>` : ''}`;
+    $('#pr-dead').disabled = x.m.issues.length < 2; if (x.m.issues.length < 2) $('#pr-dead').checked = false;
+  };
+  modSel.onchange = fillFaults; faultSel.onchange = showInfo; diffSel.onchange = showInfo; $('#pr-dead').onchange = showInfo;
+  if (pr.mod !== undefined && mods[pr.mod]) modSel.value = pr.mod;
+  fillFaults();
+  if (pr.fault !== undefined) { faultSel.value = pr.fault; showInfo(); }
+  $('#btn-practice').onclick = () => { G.sfx.unlock(); $('#pr-result').textContent = ''; $('#practice').style.display = 'flex'; };
+  $('#pr-close').onclick = () => { $('#practice').style.display = 'none'; };
+  $('#pr-random').onclick = () => { modSel.value = Math.floor(Math.random() * mods.length); fillFaults(); faultSel.value = Math.floor(Math.random() * faultSel.options.length); showInfo(); };
+  let running = false, lastT = 0;
+  const loop = (tms) => {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    const now = tms / 1000, dt = Math.min(0.1, lastT ? now - lastT : 0.016); lastT = now;
+    G.practice.tick(dt, now);
+  };
+  const result = (text, bad) => { const r = $('#pr-result'); r.innerHTML = text; r.className = bad ? 'bad' : ''; $('#practice').style.display = 'flex'; };
+  $('#pr-start').onclick = () => {
+    const x = mods[+modSel.value], fault = +faultSel.value, diff = diffSel.value, dead = $('#pr-dead').checked && x.m.issues.length > 1;
+    const key = jobKey();
+    try { localStorage.setItem('wolfram-practice', JSON.stringify({ mod: +modSel.value, fault, diff, best })); } catch (e) { /* private mode */ }
+    const stores = {}; for (const k of Object.keys(PARTS)) stores[k] = 99;
+    const PS = { settings: { difficulty: diff }, stores, comps: { [x.id]: { id: x.id, hp: dead ? 0 : 40, fire: 0, issue: fault, issue2: dead ? (fault + 1) % x.m.issues.length : null } } };
+    let done = false;
+    const host = {
+      S: () => PS, sfx: G.sfx,
+      act: (a) => { if (a === 'repair.complete') done = true; },
+      toast: () => {},
+      onClose: () => {
+        running = false;
+        const g = G.practice;
+        if (done) {
+          const t = g.elapsed, prev = best[key], rec = !prev || t < prev;
+          if (rec) best[key] = t;
+          try { localStorage.setItem('wolfram-practice', JSON.stringify({ mod: +modSel.value, fault, diff, best })); } catch (e) { /* private mode */ }
+          result(`Repaired in <b>${fmtClock(t)}</b> · ${g.errors} mistake${g.errors === 1 ? '' : 's'}${rec ? (prev ? ` · <b>new best</b> (was ${fmtClock(prev)})` : ' · first time logged') : ` · best ${fmtClock(prev)}`}`);
+          showInfo();
+        } else result('Repair abandoned.', true);
+      },
+    };
+    if (!G.practice) G.practice = new RepairGame(host); else G.practice.host = host;
+    G.practice.practice = true;
+    $('#practice').style.display = 'none';
+    if (G.practice.start(x.id)) { running = true; lastT = 0; requestAnimationFrame(loop); }
+  };
+  addEventListener('keydown', (e) => { if (G.practice && G.practice.open && !G.S) { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase(); if (G.practice.key(k === 'esc' ? 'escape' : k)) e.preventDefault(); } });
+}
+
+// the pilot's log: Δv per leg against the ideal plan, burn accuracy, capture, rendezvous and docking contact
+function pilotReport(S) {
+  const legs = (S.pilot && S.pilot.legs) || [];
+  if (!legs.length) return '';
+  const row = (L) => {
+    const name = `${WAYPOINTS[L.leg].name.split(',')[0]} → ${(WAYPOINTS[L.leg + 1] || WAYPOINTS[L.leg]).name.split(',')[0]}`;
+    const waste = L.dvIdeal ? Math.max(0, L.dvUsed - L.dvIdeal) : 0;
+    const burns = L.burns.length ? Math.round(L.burns.reduce((a, b) => a + b.score, 0) / L.burns.length) + '/100' : '—';
+    const cap = L.capture ? `${Math.round((L.capture.eff / L.capture.need) * 100)}% eff.${L.capture.centre !== null ? `, ${Math.abs(L.capture.centre)} s off periapsis` : ''}` : '—';
+    const rv = L.rendezvous ? `${Math.floor(L.rendezvous.t / 60)}:${String(L.rendezvous.t % 60).padStart(2, '0')}, ${L.rendezvous.used} m/s` : '—';
+    const dock = L.dock ? `${L.dock.v} m/s, ${L.dock.lat} m off${L.dock.bumps ? `, ${L.dock.bumps} bump${L.dock.bumps > 1 ? 's' : ''}` : ''}` : '—';
+    const extra = [L.missedCapture ? `${L.missedCapture} missed capture` : '', L.waveOffs ? `${L.waveOffs} wave-off` : '', L.slotsLost ? `${L.slotsLost} slot lost` : '', L.dodges ? `${L.dodges} rock dodged` : '', L.rockHits ? `${L.rockHits} rock hit` : ''].filter(Boolean).join(', ');
+    return `<tr><td>${name}</td><td>${(L.dvUsed / 1000).toFixed(0)} km/s${waste > 1000 ? ` <i class="warn">(+${(waste / 1000).toFixed(0)} wasted)</i>` : ''}</td><td>${burns}</td><td>${cap}</td><td>${rv}</td><td>${dock}</td><td>${extra || '—'}</td></tr>`;
+  };
+  return `<h3>Pilot's log</h3><table class="tbl"><tr><th>Leg</th><th>Δv used</th><th>Burn accuracy</th><th>Capture</th><th>Rendezvous</th><th>Docking contact</th><th>Notes</th></tr>${legs.map(row).join('')}</table>`;
+}

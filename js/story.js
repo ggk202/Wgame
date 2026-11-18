@@ -4,6 +4,7 @@ import { clamp, rand, randi, chance, weightedPick, log, fx, startVote } from './
 import { EVENTS } from './events.js';
 import { applyHit } from './combat.js';
 import { PDCS, eff } from './sim.js';
+import { streamExposure } from './flight.js';
 
 // Semi-scripted beats: fire once when leg progress passes `p`.
 export const BEATS = [
@@ -84,14 +85,16 @@ export function updateEffects(S, dt) {
       let n = 4;
       if (S.drive.evasive && S.drive.ignited) n -= 2;
       if (S.weap.pdcMode !== 'off') n -= PDCS.reduce((s, id) => s + eff(S, id) * 0.6, 0);
-      n = Math.max(0, Math.round(n + rand(-0.5, 0.5)));
+      const ex = E.debrisFrom ? streamExposure(S, E.debrisFrom) : 1;
+      n = Math.max(0, Math.round(n * ex + rand(-0.5, 0.5)));
+      if (ex < 0.4) log(S, 'The shadow shield took most of the debris.', 'good');
       if (n === 0) log(S, 'Debris field cleared without impacts', 'good');
       for (let i = 0; i < n; i++) applyHit(S, rand(10, 22), { label: 'Debris impact', fireP: 0.1, breachP: 0.6, extBias: 0.5 });
     }
   }
   if (E.shower > 0) {
     E.showerT -= dt;
-    if (E.showerT <= 0) { E.shower--; E.showerT = rand(4, 9); applyHit(S, rand(14, 30), { label: 'Meteoroid strike', fireP: 0.15, breachP: 0.75, extBias: 0.4 }); }
+    if (E.showerT <= 0) { E.shower--; E.showerT = rand(4, 9); const ex = E.showerFrom ? streamExposure(S, E.showerFrom) : 1; if (chance(ex)) applyHit(S, rand(14, 30) * (0.5 + ex * 0.5), { label: 'Meteoroid strike', fireP: 0.15, breachP: 0.75 * ex, extBias: 0.4 }); else log(S, 'Meteoroid strike absorbed by the shadow shield', 'info'); }
   }
   for (const k of ['leakT', 'escortT', 'reactorRadT']) if (E[k] > 0) E[k] = Math.max(0, E[k] - dt);
   // Nanite breach sealing (Recruit)

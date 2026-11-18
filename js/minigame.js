@@ -181,7 +181,7 @@ export class RepairGame {
     this.open = false;
     const el = (this.el = document.createElement('div'));
     el.id = 'repair';
-    el.innerHTML = `<div class="rg-win"><div class="rg-head"><b class="rg-title"></b><span class="rg-sub"></span><button class="rg-x" title="Abandon (Esc)">✕ ABANDON</button></div>
+    el.innerHTML = `<div class="rg-win"><div class="rg-head"><b class="rg-title"></b><span class="rg-sub"></span><span class="rg-time"></span><button class="rg-x" title="Abandon (Esc)">✕ ABANDON</button></div>
       <div class="rg-main"><div class="rg-view"><canvas></canvas><div class="rg-msg"></div><div class="rg-prog"><i></i></div></div>
       <div class="rg-side"><div class="rg-h">TOOLS</div><div class="rg-tools"></div><div class="rg-sizes"></div><div class="rg-h">PARTS FROM STORES</div><div class="rg-parts"></div><div class="rg-h">PROCEDURE</div><ol class="rg-steps"></ol></div></div></div>`;
     document.body.appendChild(el);
@@ -231,7 +231,7 @@ export class RepairGame {
     this.diff = S.settings.difficulty;
     this.speed = { recruit: 0.6, spacer: 0.8, veteran: 1, newtonian: 1.25 }[this.diff] || 1;
     this.hints = this.diff === 'recruit' || this.diff === 'spacer';
-    this.used = {}; this.stage = 0; this.action = null; this.tool = 'hand'; this.part = null; this.bit = 'PH2'; this.socket = '13';
+    this.used = {}; this.stage = 0; this.errors = 0; this.elapsed = 0; this.action = null; this.tool = 'hand'; this.part = null; this.bit = 'PH2'; this.socket = '13';
     this.el.querySelector('.rg-title').textContent = `${COMPS[id].name.toUpperCase()} — ${need.issues.map((i) => i.label.toUpperCase()).join(' + ')}`;
     this.buildStage();
     this.el.style.display = 'flex'; this.open = true;
@@ -251,7 +251,7 @@ export class RepairGame {
     const v = this.el.querySelector('.rg-view'), w = v.clientWidth, h = v.clientHeight;
     this.renderer.setSize(w, h, false); this.cam.aspect = w / h; this.cam.updateProjectionMatrix();
   }
-  say(t, bad) { this.msgEl.textContent = t; this.msgEl.className = 'rg-msg' + (bad ? ' bad' : ''); this.msgT = 5; if (bad && this.host.sfx) this.host.sfx.play('warn'); }
+  say(t, bad) { if (bad) this.errors = (this.errors || 0) + 1; this.msgEl.textContent = t; this.msgEl.className = 'rg-msg' + (bad ? ' bad' : ''); this.msgT = 5; if (bad && this.host.sfx) this.host.sfx.play('warn'); }
   size(kind) { // fastener sizes by difficulty
     if (kind === 'screw') return this.diff === 'recruit' ? 'PH2' : this.diff === 'spacer' ? mgPick(['PH1', 'PH2']) : this.diff === 'veteran' ? mgPick(['PH2', 'HEX4']) : mgPick(BITS);
     return this.diff === 'recruit' || this.diff === 'spacer' ? '13' : this.diff === 'veteran' ? mgPick(['13', '17']) : mgPick(SOCKETS);
@@ -774,6 +774,8 @@ export class RepairGame {
     // check the module is still broken the same way (someone else may have fixed it)
     const S = this.host.S(), need = repairNeeds(S, this.id);
     if (!need || need.issues.map((i) => i.label).join('|') !== this.jobKey) { this.close(false); this.host.toast && this.host.toast('That module was repaired by someone else', 'good'); return; }
+    this.elapsed += dt;
+    const tm = this.el.querySelector('.rg-time'); tm.textContent = this.practice ? fmtClock(this.elapsed) : '';
     if (this.msgT > 0) { this.msgT -= dt; if (this.msgT <= 0) this.msgEl.textContent = ''; }
     // tool follows the cursor; during an action it moves onto the target and animates
     const tool = this.curTool, a = this.action;
@@ -834,6 +836,7 @@ export class RepairGame {
   }
 }
 
+export const fmtClock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 // star tightening order for n bolts on a circle (e.g. 8: 0,4,2,6,1,5,3,7)
 function starOrder(n) {
   if (n === 4) return [0, 2, 1, 3];

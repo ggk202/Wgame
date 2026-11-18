@@ -172,7 +172,7 @@ function pdcIntercept(S, pr, base) {
   for (const id of PDCS) {
     const e = eff(S, id);
     if (e <= 0 || S.stores.pdcAmmo < 100 || !pdcCanSee(id, d)) continue;
-    const pk = W.pdcMode === 'auto' ? base : focused ? base * 1.6 : base * 0.3;
+    const pk = (W.pdcMode === 'auto' ? base : focused ? base * 1.6 : base * 0.3) + (S.scoutOut ? 0.06 : 0);
     pSurvive *= 1 - clamp(pk * e, 0, 0.95);
     engaged++;
   }
@@ -200,7 +200,7 @@ export function updateWeapons(S, dt) {
     else {
       const se = eff(S, 'sensors') * (0.3 + 0.7 * eff(S, 'sensorArray'));
       if (se <= 0) Sn.q = Math.max(0, Sn.q - 0.1 * dt);
-      else Sn.q = Math.min(1, Sn.q + 0.07 * se * dt * (S.effects.stormT > 0 ? 0.4 : 1) * clamp(2500 / tgt.range, 0.3, 1.5));
+      else Sn.q = Math.min(1, Sn.q + 0.07 * se * dt * (S.scoutOut ? 1.4 : 1) * (S.effects.stormT > 0 ? 0.4 : 1) * clamp(2500 / tgt.range, 0.3, 1.5));
     }
   }
 }
@@ -252,7 +252,12 @@ export function updateCombat(S, dt) {
     e.missileCd -= dt;
     if (e.missiles > 0 && e.missileCd <= 0 && e.range < 4000 && !e.fleeing) {
       const n = Math.min(e.missiles, 1 + randi(0, E.pts > 150 ? 2 : 1));
-      for (let i = 0; i < n; i++) E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'them', src: e.id, dir0: e.dir.slice(), range: e.range, speed: 10, dmg: 30, off: [rand(-1, 1), rand(-1, 1)] });
+      for (let i = 0; i < n; i++) {
+        // a torpedo coming straight in (onto the side we show the enemy) is fastest; those that curve round to
+        // hit another side fly a longer path and arrive later
+        const off = [rand(-1, 1), rand(-1, 1)], k = Math.hypot(off[0], off[1]) / Math.SQRT2;
+        E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'them', src: e.id, dir0: e.dir.slice(), range: e.range, speed: 10 * (1.3 - 0.55 * k), dmg: 30, off });
+      }
       fx(S, 'efire', { id: e.id, w: 'missile' });
       e.missiles -= n; e.missileCd = rand(20, 32);
       log(S, `${e.name} launched ${n} torpedo${n > 1 ? 'es' : ''}!`, 'bad');
@@ -297,7 +302,7 @@ export function updateCombat(S, dt) {
         // nose-on we present a far smaller cross-section; tumbling/jinking spoils their firing solution
         const aspect = src ? Math.abs(Math.sin((angDeg(nose(S.att.q), src.dir) * Math.PI) / 180)) : 1;
         const size = 0.55 + 0.45 * aspect, spin = vlen(S.att.w) > 0.025 ? 0.75 : 1;
-        let p = pr.type === 'missile' ? 0.9 * (pr.chaffed ? 0.45 : 1) : 0.5 * size * spin * (S.drive.evasive && canBurn ? 0.45 : 1) * Math.max(0.35, 1 - pr.r0 / 4000);
+        let p = pr.type === 'missile' ? 0.9 * (pr.chaffed ? 0.45 : 1) * (0.7 + 0.3 * size) : 0.5 * size * spin * (S.drive.evasive && canBurn ? 0.45 : 1) * Math.max(0.35, 1 - pr.r0 / 4000);
         if (chance(p)) applyHit(S, pr.dmg, { label: pr.type === 'missile' ? 'Torpedo hit' : 'Railgun hit' });
         else log(S, pr.type === 'missile' ? 'Torpedo missed — decoyed' : 'Enemy slug went wide', 'good');
       } else {

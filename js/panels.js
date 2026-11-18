@@ -7,10 +7,14 @@ import { PARTS, PART_IDS, repairNeeds, missingParts, moduleOf } from './repair.j
 import { RAIL_CONE } from './combat.js';
 import { ENEMY_TYPES } from './combat.js';
 import { EVENTS } from './events.js';
+import { CAP, ORBIT, RV, rvSafe, capEff, strainLimits, safeG, sunBody, radiatorSunFactor, stormShield, streamExposure } from './flight.js';
+import { EXPERIMENTS, SCI_COST, sciConditions, UPG_TEXT, fmtLag, podState, POD_CRADLE } from './crew.js';
+import { pdcCanSee } from './hull.js';
+import { projBodyDir } from './combat.js';
 import { bar, btn, cls, esc } from './ui.js';
 
 const kmps = (v) => (v / 1000).toFixed(1) + ' km/s';
-const stateName = { transit: 'IN TRANSIT', orbit: 'IN ORBIT', approach: 'DOCKING APPROACH', docking: 'LATCHING', docked: 'DOCKED' };
+const stateName = { transit: 'IN TRANSIT', capture: 'CAPTURE (HYPERBOLIC)', orbit: 'PARKING ORBIT', rendezvous: 'RENDEZVOUS', approach: 'DOCKING APPROACH', docking: 'LATCHING', docked: 'DOCKED' };
 const destName = (S) => WAYPOINTS[Math.min(S.nav.leg + 1, WAYPOINTS.length - 1)].name;
 
 function flightBlock(B) {
@@ -35,31 +39,127 @@ function stopInfo(S) {
   return { rem, stop, toward, slack, a };
 }
 
+// What the pilot needs right now: capture countdown, orbit trim, rendezvous profile, rocks, structure, burn advice
+function directorHTML(S) {
+  const N = S.nav, D = S.drive, out = [];
+  const row = (k, v, c = '') => `<div class="kv"><label>${k}</label><b class="${c}">${v}</b></div>`;
+  if (N.state === 'capture' && N.cap) {
+    const C = N.cap, tPe = C.tPe - C.t, k = C.dvEff / C.dvNeed;
+    out.push(`<h4 class="dir">CAPTURE BURN</h4>`);
+    out.push(row('Periapsis', tPe > 0 ? `T−${Math.ceil(tPe)} s` : `T+${Math.ceil(-tPe)} s`, Math.abs(tPe) < CAP.window ? 'good' : tPe < -40 ? 'bad' : 'warn'));
+    out.push(row('Burn window', Math.abs(tPe) < CAP.window ? `<b class="good">OPEN</b> · efficiency ${pct(capEff(tPe))}` : tPe > 0 ? `opens in ${Math.ceil(tPe - CAP.window)} s · efficiency now ${pct(capEff(tPe))}` : `closed · efficiency ${pct(capEff(tPe))}`));
+    out.push(`<div class="kv"><label>Capture Δv</label>${bar(Math.min(1, k), k >= 1 ? 'good' : k > 0.55 ? 'warn' : 'bad', `${(C.dvEff / 1000).toFixed(2)} / ${(C.dvNeed / 1000).toFixed(2)} km/s`)}</div>`);
+    out.push(`<div class="note">Point <b>RETROGRADE</b> (SAS Retro), ignite near periapsis and burn until the bar is full. Burning off-centre wastes Δv (Oberth effect); too little leaves an eccentric orbit or a missed capture.</div>`);
+  }
+  if (N.state === 'orbit') {
+    const e = N.ecc || 0, dtPe = Math.abs(N.peT) < ORBIT.period / 2 ? N.peT : N.peT - ORBIT.period;
+    out.push(row('Orbit', `e = ${e.toFixed(3)}${e > ORBIT.ecc ? ` — circularise below ${ORBIT.ecc}` : ' — circular, cleared for approach'}`, e > ORBIT.ecc ? 'warn' : 'good'));
+    if (e > ORBIT.ecc) out.push(row('Next periapsis', Math.abs(dtPe) < ORBIT.window ? '<b class="good">BURN RETROGRADE NOW</b>' : `in ${Math.ceil(dtPe > 0 ? dtPe : dtPe + ORBIT.period)} s`, Math.abs(dtPe) < ORBIT.window ? 'good' : ''));
+    if (N.holdT > 0) out.push(row('Traffic hold', `${Math.ceil(N.holdT)} s`, 'warn'));
+  }
+  if (N.state === 'rendezvous' && N.rv) {
+    const R = N.rv, safe = rvSafe(R.d);
+    out.push(`<h4 class="dir">RENDEZVOUS</h4>`);
+    out.push(row('Station', `${(R.d / 1000).toFixed(2)} km ahead · closing ${R.vc.toFixed(1)} m/s`, R.vc > safe ? 'bad' : R.vc < 0 ? 'warn' : 'good'));
+    out.push(row('Safe closing speed', `${safe.toFixed(1)} m/s${R.vc > safe ? ' — <b>BRAKE (retro burn)</b>' : R.vc < 1 && R.d > RV.handoff + 200 ? ' — burn prograde to close' : ''}`));
+    out.push(row('Hold point', `${RV.handoff} m, arrive below ${RV.maxHandoffV} m/s · time compression ×${S.warp}`));
+  }
+  if (N.slotT > 0) out.push(row('Approach slot', `${Math.floor(N.slotT / 60)}:${String(Math.floor(N.slotT % 60)).padStart(2, '0')} left`, N.slotT < 60 ? 'bad' : N.slotT < 150 ? 'warn' : ''));
+  if (S.effects.chunk) { const C = S.effects.chunk; out.push(`<div class="kv"><label class="bad">ROCK INBOUND</label>${bar(Math.min(1, C.got / C.need), C.got >= C.need ? 'good' : 'bad', `${C.got.toFixed(2)} / ${C.need} m/s sideways · impact ${Math.ceil(C.t)} s`)}</div><div class="note">Translate with the RCS pad below (or <b>J/L/U/O</b>), or burn with the nose off-axis.</div>`); }
+  // structural load
+  const lims = strainLimits(S);
+  if ((S.strain && S.strain.v > 0.02) || (D.ignited && lims.length)) {
+    const sv = S.strain ? S.strain.v : 0;
+    out.push(`<div class="kv"><label>Structure</label>${bar(Math.min(1, sv), sv > 0.8 ? 'bad' : sv > 0.4 ? 'warn' : 'good', `${pct(sv)} · safe ≤ ${safeG(S).toFixed(2)} g (${lims.map((l) => l.text).join(', ') || 'clean'})`)}</div>`);
+  }
+  if (N.advice) {
+    const A = N.advice;
+    out.push(`<div class="kv"><label>Burn advice</label><b class="${A.ok ? 'good' : 'warn'}">${A.burn ? `${A.mode === 'pro' ? 'PROGRADE' : 'RETROGRADE'} at ${A.g.toFixed(2)} g · ${(A.dv / 1000).toFixed(0)} km/s to go` : 'COAST — drive off'}${A.ok ? ' ✓' : ''}</b></div>`);
+  }
+  return out.join('');
+}
+// Threat cone: the whole sky around the ship seen from the bow (centre = nose, rim = stern). Shaded: what each gatling
+// can cover from its mount. Red: torpedoes and drones inbound. Rolling and pitching moves the coverage onto them.
+let _cov = null;
+function coverageGrid() {
+  if (_cov) return _cov;
+  const n = 48, g = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const u = (i + 0.5) / n * 2 - 1, v = (j + 0.5) / n * 2 - 1, r = Math.hypot(u, v);
+    if (r > 1) { g.push(-1); continue; }
+    const ang = r * Math.PI, phi = Math.atan2(-v, u);
+    const d = [Math.sin(ang) * Math.cos(phi), Math.sin(ang) * Math.sin(phi), -Math.cos(ang)];
+    g.push(PDCS.reduce((s, id) => s + (pdcCanSee(id, d) ? 1 : 0), 0));
+  }
+  return (_cov = { n, g });
+}
+function drawThreatCone(g, S, w, h) {
+  const R = Math.min(h / 2 - 10, 110), cx = R + 14, cy = h / 2;
+  g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
+  const C = coverageGrid(), cell = (2 * R) / C.n;
+  for (let i = 0; i < C.n; i++) for (let j = 0; j < C.n; j++) {
+    const k = C.g[i * C.n + j]; if (k < 0) continue;
+    g.fillStyle = k === 0 ? '#2a0a04' : k === 1 ? '#3d2a08' : k === 2 ? '#55450c' : '#6d6012';
+    g.fillRect(cx - R + i * cell, cy - R + j * cell, cell + 0.5, cell + 0.5);
+  }
+  g.strokeStyle = '#3a1a04'; for (const r of [0.25, 0.5, 0.75, 1]) { g.beginPath(); g.arc(cx, cy, r * R, 0, 7); g.stroke(); }
+  g.fillStyle = '#a8581a'; g.font = '10px monospace'; g.fillText('NOSE', cx - 12, cy + 3); g.fillText('BROADSIDE', cx - 26, cy - R / 2 - 3); g.fillText('STERN (rim)', cx - 30, cy + R + 9);
+  g.fillText('DORSAL ▲', cx - 24, cy - R + 10); g.fillText('STBD ▶', cx + R - 40, cy + 12);
+  const P = (d) => { const ang = Math.acos(Math.max(-1, Math.min(1, -d[2]))), phi = Math.atan2(d[1], d[0]), r = (ang / Math.PI) * R; return [cx + Math.cos(phi) * r, cy - Math.sin(phi) * r]; };
+  const qi = qconj(S.att.q);
+  let nThreat = 0, nCovered = 0;
+  if (S.enc) {
+    for (const e of S.enc.enemies) { if (e.dead || e.gone) continue; const [x, y] = P(qrot(qi, e.dir)); g.strokeStyle = '#ffd23f'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 6, y); g.lineTo(x, y + 6); g.lineTo(x - 6, y); g.closePath(); g.stroke(); }
+    const th = [...S.enc.proj.filter((p) => p.from === 'them' && p.type === 'missile' && !p.done), ...S.enc.enemies.filter((e) => !e.dead && !e.gone && ENEMY_TYPES[e.type].kamikaze)];
+    for (const t of th) {
+      const d = projBodyDir(S, t), cov = PDCS.some((id) => pdcCanSee(id, d) && eff(S, id) > 0);
+      nThreat++; if (cov) nCovered++;
+      const [x, y] = P(d); g.fillStyle = cov ? '#ff8a1e' : '#ff2a1a'; g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill();
+      if (!cov) { g.strokeStyle = '#ff2a1a'; g.beginPath(); g.arc(x, y, 8, 0, 7); g.stroke(); }
+    }
+  }
+  const tx = cx + R + 22; g.font = '12px monospace';
+  g.fillStyle = '#ffc27a'; g.fillText('POINT-DEFENCE COVERAGE', tx, 22);
+  g.fillStyle = '#a8581a'; g.font = '11px monospace';
+  ['Bright: 2–3 gatlings bear', 'Dim: 1 gatling', 'Dark red: blind spot'].forEach((t, i) => g.fillText(t, tx, 42 + i * 16));
+  g.fillStyle = nThreat && nCovered < nThreat ? '#ff3b2f' : '#9dff7a'; g.font = '12px monospace';
+  g.fillText(nThreat ? `${nCovered} of ${nThreat} inbound covered` : 'No inbound threats', tx, 104);
+  if (nThreat && nCovered < nThreat) { g.fillStyle = '#ff8a1e'; g.font = '11px monospace'; g.fillText('Roll/pitch to bring the', tx, 122); g.fillText('ringed threats into the light', tx, 136); }
+  const lock = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone);
+  if (lock) { const a = angDeg(nose(S.att.q), lock.dir), asp = Math.abs(Math.sin((a * Math.PI) / 180)); g.fillStyle = '#a8581a'; g.fillText(`Aspect to target: ${a.toFixed(0)}°`, tx, 162); g.fillText(`Cross-section: ${pct(0.55 + 0.45 * asp)} (nose-on is smallest)`, tx, 178); g.fillText(a <= RAIL_CONE ? 'Railgun can bear' : 'Railgun needs nose-on', tx, 194); }
+}
+
 export const PANELS = {
   helm: {
     title: 'HELM',
     build(B) {
       B.view('dock', (S) => S.nav.state === 'approach' || S.nav.state === 'docking');
-      B.pad('Translate (RCS)', [['FWD ⇡ I', 't', 2, 1], ['BACK ⇣ K', 't', 2, -1], ['◀ LEFT J', 't', 0, -1], ['RIGHT L ▶', 't', 0, 1], ['UP U', 't', 1, 1], ['DOWN O', 't', 1, -1]], (S) => S.nav.state === 'approach');
+      B.pad('Translate (RCS)', [['FWD ⇡ I', 't', 2, 1], ['BACK ⇣ K', 't', 2, -1], ['◀ LEFT J', 't', 0, -1], ['RIGHT L ▶', 't', 0, 1], ['UP U', 't', 1, 1], ['DOWN O', 't', 1, -1]], (S) => S.nav.state === 'approach' || !!S.effects.chunk);
       B.buttons([
         { label: 'Request approach', act: 'helm.dock', show: (S) => S.nav.state === 'orbit', enabled: (S) => S.nav.state === 'orbit' },
         { label: 'Undock & depart', act: 'helm.depart', cls: 'green', show: (S) => S.nav.state === 'docked', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1 },
         { label: 'Back off & re-approach', act: 'helm.reapproach', show: (S) => S.nav.state === 'approach' },
       ]);
+      B.html(directorHTML);
       B.section('Attitude');
       B.canvas(560, 230, drawAttitude);
-      B.seg('SAS', [{ v: 'off', l: 'Off' }, { v: 'hold', l: 'Hold' }, { v: 'pro', l: 'Prograde' }, { v: 'retro', l: 'Retro' }, { v: 'target', l: 'Target' }, { v: 'dock', l: 'Dock align' }], (S) => S.att.mode, 'att.mode', (v) => ({ m: v }), (S, v) => sasModes(S).includes(v));
+      B.seg('SAS', [{ v: 'off', l: 'Off' }, { v: 'hold', l: 'Hold' }, { v: 'pro', l: 'Prograde' }, { v: 'retro', l: 'Retro' }, { v: 'target', l: 'Target' }, { v: 'shield', l: 'Stern to Sun' }, { v: 'sun', l: 'Nose to Sun' }, { v: 'dock', l: 'Dock align' }], (S) => S.att.mode, 'att.mode', (v) => ({ m: v }), (S, v) => sasModes(S).includes(v));
       B.pad('Rotate (RCS)', [['▲ NOSE UP S', 'r', 0, 1], ['▼ NOSE DN W', 'r', 0, -1], ['◀ YAW A', 'r', 1, 1], ['YAW D ▶', 'r', 1, -1], ['⟲ ROLL Q', 'r', 2, 1], ['ROLL E ⟳', 'r', 2, -1]]);
       B.note((S) => `Keys while seated: <b>W/S</b> pitch · <b>A/D</b> yaw · <b>Q/E</b> roll · <b>X</b> kill rotation${S.nav.state === 'approach' ? ' · <b>I/K</b> forward/back · <b>J/L</b> left/right · <b>U/O</b> up/down' : ''}. ${S.settings.sas === 'none' ? 'No SAS on this difficulty: every rotation you start, you must stop yourself.' : S.settings.sas === 'hold' ? 'SAS can only damp rotation (Hold). Pointing is up to you.' : ''}`);
       B.section('Flight');
       flightBlock(B);
       B.buttons([
-        { label: 'Ignite drive', act: 'helm.ignite', enabled: (S) => !S.drive.ignited && S.nav.state === 'transit' },
+        { label: 'Ignite drive', act: 'helm.ignite', enabled: (S) => !S.drive.ignited && ['transit', 'capture', 'orbit', 'rendezvous'].includes(S.nav.state) },
         { label: 'Cut drive', act: 'helm.cutoff', cls: 'red', enabled: (S) => S.drive.ignited },
         { label: 'Flip 180° (SAS)', act: 'helm.flip', enabled: (S) => S.drive.flip <= 0 && S.nav.state === 'transit' && sasModes(S).includes('pro') },
       ]);
       B.slider('Thrust (g)', { min: 0, max: 2, step: 0.01, maxFn: (S) => maxG(S).toFixed(2), get: (S) => S.drive.cmdG, fmt: (v) => v.toFixed(2) + ' g', act: 'helm.g', args: (v) => ({ g: v }) });
-      B.buttons([{ label: 'Autopilot', labelFn: (S) => (S.settings.autopilot ? `Autopilot: ${S.nav.autopilot ? 'ENGAGED' : 'OFF'}` : 'Autopilot: N/A at this difficulty'), act: 'helm.autopilot', args: () => ({ on: !B.ctx.S().nav.autopilot }), enabled: (S) => S.settings.autopilot }]);
+      B.buttons([
+        { label: 'Autopilot', labelFn: (S) => (S.settings.autopilot ? `Autopilot: ${S.nav.autopilot ? 'ENGAGED' : 'OFF'}` : 'Autopilot: N/A at this difficulty'), act: 'helm.autopilot', args: () => ({ on: !B.ctx.S().nav.autopilot }), enabled: (S) => S.settings.autopilot },
+        { label: 'Manual burns', labelFn: (S) => `Manual burns (computer advises): ${S.nav.manual ? 'ON' : 'OFF'}`, act: 'helm.manual', args: () => ({ on: !B.ctx.S().nav.manual }) },
+      ]);
+      B.kv('Structure', (S) => { const l = strainLimits(S); return { text: `safe thrust ≤ ${safeG(S).toFixed(2)} g${l.length ? ' — ' + l.map((x) => x.text).join(', ') : ' (ring stopped, radiators stowed, nobody outside)'}${S.drive.capped ? ' · flight computer limiting thrust' : ''}`, cls: S.drive.ignited && S.drive.g > safeG(S) ? 'bad' : '' }; });
+      B.kv('Sun', (S) => { const s = sunBody(S), rf = radiatorSunFactor(S); return { text: `${(s.au).toFixed(2)} AU · radiators ${pct(rf)} efficient${rf < 0.8 ? ' (sunlight on the panels — turn them edge-on)' : ''}${S.effects.stormT > 0 || S.effects.stormWarn > 0 ? ` · storm shielding ${pct(0.85 * stormShield(S))}` : ''}`, cls: rf < 0.7 ? 'warn' : '' }; });
       B.note((S) => {
         if (S.nav.state !== 'transit') return '';
         const i = stopInfo(S);
@@ -69,6 +169,7 @@ export const PANELS = {
         return `Stopping distance at ${S.nav.plan.g.toFixed(2)} g: ${fmtDist(i.stop)}. ${S.drive.orient < 0 ? 'Decelerating.' : `Flip and start the decel burn in about <b>${fmtTime(real)}</b> (real time).`}`;
       });
       B.section('Combat');
+      B.canvas(560, 240, drawThreatCone);
       B.toggle('Evasive jinking', (S) => S.drive.evasive, 'helm.evasive', (v) => ({ on: v }));
       B.seg('Range', [{ v: 'hold', l: 'Hold' }, { v: 'open', l: 'Open range' }, { v: 'close', l: 'Close' }], (S) => S.drive.maneuver, 'helm.maneuver', (v) => ({ m: v }));
       B.note((S) => { const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone); const aim = t ? angDeg(nose(S.att.q), t.dir) : null; return (t ? `<b>${aim <= RAIL_CONE ? 'RAIL SOLUTION' : 'Target ' + aim.toFixed(1) + '° off the nose'}</b> · ` : '') + 'The spinal railgun only fires along the nose: point the ship at the target (SAS Target, or by hand). Nose-on you also present a much smaller silhouette. Rotating or jinking spoils enemy railgun solutions; jinking adds 1.2 g.'; });
@@ -77,6 +178,7 @@ export const PANELS = {
         { label: 'Request approach', act: 'helm.dock', enabled: (S) => S.nav.state === 'orbit' },
         { label: 'Undock & depart', act: 'helm.depart', cls: 'green', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1 },
       ]);
+      B.note('Arrival: a capture burn at periapsis, then circularise if needed. Request an approach slot: rendezvous from ~10 km to the 200 m hold point within the slot time, then fly the docking.');
       B.note('Docking is flown by hand: the approach starts about 200 m out. Null your sideways drift, line the cross up inside the target circle, match roll, and touch the port slower than 0.25 m/s.');
       camBlock(B);
     },
@@ -107,6 +209,7 @@ export const PANELS = {
       B.kv('Range / velocity', (S) => `${fmtDist(S.nav.L - S.nav.x)} · ${kmps(S.nav.v)}`);
       B.kv('ETA at current speed', (S) => { const r = S.nav.L - S.nav.x; if (S.nav.state !== 'transit' || S.nav.v * r <= 0) return '—'; const t = r / S.nav.v; return `${fmtGameTime(t)} ship time (~${fmtTime(t / S.settings.warpBase)} real)`; });
       B.kv('Time compression', (S) => (S.warp > 1 ? `×${S.warp}` : 'REAL TIME (combat or docking)'));
+      B.html(directorHTML);
       B.section('Burn plan (used by autopilot)');
       B.slider('Cruise speed', { min: 50, max: 1500, step: 10, get: (S) => S.nav.plan.cruise, fmt: (v) => v + ' km/s', act: 'nav.plan', args: (v) => ({ cruise: v }) });
       B.slider('Burn acceleration', { min: 0.05, max: 1.2, step: 0.01, get: (S) => S.nav.plan.g, fmt: (v) => v.toFixed(2) + ' g', act: 'nav.plan', args: (v) => ({ g: v }) });
@@ -207,6 +310,17 @@ export const PANELS = {
         { label: 'Request approach', act: 'helm.dock', enabled: (S) => S.nav.state === 'orbit', show: (S) => S.nav.state === 'orbit' },
         { label: 'Undock & depart', act: 'helm.depart', cls: 'green', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1, show: (S) => S.nav.state === 'docked' },
       ]);
+      B.section('Hails');
+      B.html((S) => {
+        const hs = ((S.comms && S.comms.hails) || []).filter((h) => S.gameTime >= h.arrive).slice().reverse();
+        if (!hs.length) return '<div class="note">No hails awaiting a reply. Messages from far away arrive late, and so do your answers.</div>';
+        return hs.map((h) => {
+          const left = h.deadline - S.gameTime - h.lag; // reply must leave before this to arrive in time
+          const st = h.done ? (h.expired ? '<b class="bad">no reply sent in time</b>' : `<b class="good">reply delivered</b>`) : h.reply ? `<b class="warn">reply in flight — arrives in ${fmtLag(Math.max(0, h.replyArrive - S.gameTime))}</b>` : left > 0 ? `<b class="${left < 600 ? 'bad' : 'warn'}">reply within ${fmtGameTime(left)} ship time for it to arrive on time</b>` : '<b class="bad">too late</b>';
+          const opts = !h.done && !h.reply && left > 0 ? h.opts.map((o) => `<button class="btn" data-act="comms.reply" data-args='${JSON.stringify({ id: h.id, opt: o.id })}'>${esc(o.label)}</button>`).join(' ') : '';
+          return `<div class="msg"><b>${esc(h.from)}</b> <i>(light-lag ${fmtLag(h.lag)} each way)</i><p>${esc(h.text)}</p><div>${st}</div><div class="grid2">${opts}</div></div>`;
+        }).join('');
+      });
       B.section('Message log');
       B.html((S) => S.msgs.slice().reverse().map((m) => `<div class="msg"><b>${esc(m.from)}</b>${m.lag > 60 ? ` <i>(sent ${Math.round(m.lag / 60)} min ago)</i>` : ''}<p>${esc(m.text)}</p></div>`).join('') || '<div class="note">No messages.</div>');
     },
@@ -467,7 +581,31 @@ export const PANELS = {
       ]);
       B.bar('Bearing wear', (S) => ({ v: S.ring.wear, text: pct(S.ring.wear), cls: S.ring.wear > 0.8 ? 'bad' : S.ring.wear > 0.5 ? 'warn' : 'good' }));
       B.kv('Motor draw', (S) => `${demandOf(S, 'centrifuge').toFixed(1)} MW`);
-      B.note((S) => `Spinning the ring up or down pushes the opposite twist into the hull: SAS soaks it up with RCS. Under thrust the ring floor feels tilted toward the drive (now ${(Math.atan2(S.drive.g, Math.max(0.001, S.ring.g)) * 57.3).toFixed(0)}°). Each of the twelve science bays is empty, with power, data and coolant hook-ups waiting for experiments.`);
+      B.note((S) => `Spinning the ring up or down pushes the opposite twist into the hull: SAS soaks it up with RCS. Under thrust the ring floor feels tilted toward the drive (now ${(Math.atan2(S.drive.g, Math.max(0.001, S.ring.g)) * 57.3).toFixed(0)}°). Experiments run in the twelve science bays along the ring: walk up to a rack and press E.`);
+    },
+  },
+  science: {
+    title: 'SCIENCE BAY',
+    build(B, ctx, bay) {
+      B.html((S) => {
+        const run = S.sci && S.sci.bays[bay];
+        const n = +String(bay).replace('bay', '') + 1;
+        let h = `<h4>Science bay ${n}</h4>`;
+        if (run) {
+          const ex = EXPERIMENTS[run.ex], c = sciConditions(S, ex);
+          h += `<div class="kv"><label>${esc(ex.name)}</label>${bar(run.p, c.ok ? 'good' : 'warn', pct(run.p))}</div><div class="kv"><label>Conditions</label><b class="${c.ok ? 'good' : 'bad'}">${c.ok ? 'MET' : 'NOT MET — paused'} · ${esc(c.why)}</b></div>`;
+          h += `<button class="btn red" data-act="sci.stop" data-args='{"bay":"${bay}"}'>Abort experiment</button>`;
+          return h;
+        }
+        h += `<div class="note">Each payload uses ${SCI_COST.feedstock} kg of fabricator feedstock. Conditions must hold while it runs; it pauses when they don't. The first run of each pays in full (and some unlock upgrades), repeats pay half.</div><table class="tbl"><tr><th>Experiment</th><th>Needs</th><th>Time</th><th>Pays</th><th></th></tr>`;
+        const busy = new Set(Object.values((S.sci && S.sci.bays) || {}).filter(Boolean).map((r) => r.ex));
+        for (const [k, ex] of Object.entries(EXPERIMENTS)) {
+          const c = sciConditions(S, ex), done = S.sci && S.sci.done[k];
+          h += `<tr><td>${esc(ex.name)}<br><i class="note">${esc(ex.text)}</i></td><td class="${c.ok ? 'good' : ''}">${esc(c.why)}</td><td>${Math.round(ex.dur / 60)} min</td><td>${done ? Math.round(ex.credits / 2) : ex.credits} cr${ex.upg && !done ? '<br><b>+ ' + esc(UPG_TEXT[ex.upg]) + '</b>' : ''}</td><td>${busy.has(k) ? 'running' : `<button class="btn mini" data-act="sci.start" data-args='${JSON.stringify({ bay, ex: k })}' ${S.stores.feedstock < SCI_COST.feedstock ? 'disabled' : ''}>Install</button>`}</td></tr>`;
+        }
+        return h + '</table>';
+      });
+      B.html((S) => { const ups = Object.keys(S.upg || {}); return ups.length ? `<div class="note">Upgrades earned: ${ups.map((u) => UPG_TEXT[u]).join(' · ')}</div>` : ''; });
     },
   },
   lift: {
@@ -541,7 +679,15 @@ function drawAttitude(g, S, w, h) {
     g.stroke(); g.font = '10px monospace'; g.fillText(label, x + 10, y - 8);
   };
   mark([0, 0, -1], S.nav.state === 'approach' ? '#9dff7a' : '#ffc27a', S.nav.state === 'approach' ? 'port' : 'pro', S.nav.state === 'approach' ? 'PORT' : 'PRO');
-  mark([0, 0, 1], '#a8581a', 'retro', 'RETRO');
+  const cap = S.nav.state === 'capture' && S.nav.cap;
+  const ecc = S.nav.state === 'orbit' && (S.nav.ecc || 0) > ORBIT.ecc;
+  if (cap || ecc) { // the burn marker: retrograde, with the countdown to periapsis
+    const tPe = cap ? S.nav.cap.tPe - S.nav.cap.t : (Math.abs(S.nav.peT) < ORBIT.period / 2 ? S.nav.peT : S.nav.peT - ORBIT.period);
+    const open = Math.abs(tPe) < (cap ? CAP.window : ORBIT.window), [x, y] = proj([0, 0, 1]);
+    g.strokeStyle = open ? '#9dff7a' : '#ffd23f'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, 13 + (open ? Math.sin(Date.now() / 120) * 2 : 0), 0, 7); g.stroke();
+    g.fillStyle = open ? '#9dff7a' : '#ffd23f'; g.font = 'bold 11px monospace'; g.fillText(`BURN ${tPe > 0 ? 'T−' + Math.ceil(tPe) : 'T+' + Math.ceil(-tPe)}s`, x + 15, y + 14);
+  } else mark([0, 0, 1], '#a8581a', 'retro', 'RETRO');
+  if (S.att.sunDir) { const [x, y, ang] = proj(S.att.sunDir); if (ang < Math.PI * 0.98) { g.fillStyle = '#ffe070'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); g.strokeStyle = '#ffe070'; g.beginPath(); g.arc(x, y, 9, 0, 7); g.stroke(); g.font = '10px monospace'; g.fillText('SUN', x + 11, y + 4); } }
   if (S.enc) for (const e of S.enc.enemies) if (!e.dead && !e.gone) mark(e.dir, e.id === S.sensors.lock ? '#ff3b2f' : '#ffd23f', 'tgt', e.id === S.sensors.lock ? 'TGT' : '');
   const up = proj([0, 1, 0]); g.fillStyle = '#7a4a20'; g.font = '10px monospace'; g.fillText('UP', up[0] - 6, up[1] + 3);
   // nose crosshair + railgun cone
@@ -576,6 +722,7 @@ function contactList(S) {
 }
 
 export function statusBlock(B) {
+  B.html((S) => (S.cascade && S.cascade.length ? `<div class="kv"><label class="bad">CASCADING FAULTS</label><b class="warn">${S.cascade.slice(0, 5).map(esc).join('<br>')}</b></div>` : ''));
   B.kv('Hull integrity', (S) => ({ text: `${Math.round(S.hull)}% · ${S.breaches.length} breach(es)`, cls: cls(S.hull, 50, 25) }));
   B.kv('Backup crew / credits', (S) => `${S.pods} pods · ${S.credits} cr`);
   B.kv('Spare parts', (S) => PART_IDS.map((k) => `${PARTS[k].short} ${S.stores[k]}`).join(' · '));
