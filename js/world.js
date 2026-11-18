@@ -49,7 +49,7 @@ function gridTexture(base, line) {
 }
 
 // ---------------- component meshes (front faces +z) ----------------
-function buildComp(kind, accent) {
+export function buildComp(kind, accent) {
   const g = new THREE.Group();
   const body = mat(0x5a6675), dark = mat(0x2b333d), acc = mat(accent);
   const screenMat = emis(0x2ad0c0, 0.9);
@@ -177,7 +177,7 @@ function buildComp(kind, accent) {
   return { group: g, screen, glow, light, height: bb.max.y };
 }
 
-function buildFire() {
+export function buildFire() {
   const g = new THREE.Group();
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xff8030, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
   glow.scale.set(2.6, 2.6, 1); glow.position.y = 1.0; g.add(glow);
@@ -195,7 +195,7 @@ function buildFire() {
   return g;
 }
 
-function buildAvatar(color) {
+export function buildAvatar(color) {
   const g = new THREE.Group();
   const suitMat = mat(color);
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.9, 4, 8), suitMat); body.position.y = 0.85; g.add(body);

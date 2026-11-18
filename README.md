@@ -4,7 +4,7 @@
 
 The *CSV Wolfram* is a 4,000-tonne fusion torch freighter hauling a reactor core from Luna to Ganymede, with stops at Phobos and Ceres. Nobody is assigned a role. Crew drift into jobs by walking to whatever is on fire, venting, overheating or being shot at. A RimWorld-style storyteller paces the voyage with failures, hazards, combat and opportunities.
 
-▶ **Play:** `https://ggk202.github.io/Wgame/`
+▶ **Play:** `https://ggk202.github.io/Wgame/` · **Model viewer:** `https://ggk202.github.io/Wgame/viewer.html`
 
 ## Multiplayer
 
