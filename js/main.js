@@ -151,6 +151,7 @@ function enterGame() {
   if (!G.world) {
     G.world = new World($('#view'));
     G.world.screenInfo = screenInfo;
+    G.world.onScreenBoot = (id, dist) => { const v = Math.max(0, 1 - dist / 14); if (v > 0.05) { G.sfx.crtOn(v * 0.5); G.sfx.relayBank(3, 0.8, v * 0.7); } };
     G.hud = new HUD($('#hud'));
     G.panel = new PanelView($('#panel'), panelCtx());
     G.touchMode = isTouchDevice();
@@ -191,6 +192,7 @@ function panelCtx() {
   return {
     S: () => G.S, me: () => meView(), act, click: () => G.sfx.play('click'), get touch() { return G.touchMode; },
     local: (a, args) => { if (a === 'local.lift') rideLift(args.deck); if (a === 'local.eva') cycleAirlock(args.out); },
+    sfx: G.sfx,
     closePanel: () => closePanel(),
   };
 }
@@ -392,6 +394,8 @@ function frame(tms) {
   if (G.panel.open) G.panel.place(G.world.focusRect());
   document.body.classList.toggle('focused', !!G.world.focus);
   G.sfx.tick(dt, S.alert);
+  G.sfx.setConsoleHum(!!G.world.focus && G.world.focusT > 0.5);
+  { let near = 0; const me2 = meView(); if (me2) for (const id in G.world.comps) { const v = G.world.comps[id]; if (v.canvas && v.wasLive && v.group.parent && v.group.parent.visible) { const p = v.group.position; if (Math.hypot(p.x - me2.x, p.z - me2.z) < 7) near++; } } G.sfx.idle(rdt, !!G.world.focus, near); }
   G.hudT -= dt;
   if (G.hudT <= 0) { G.hudT = 0.1; G.hud.update(S, meView(), G.focus, { act, touch: G.touchMode }); }
   G.panelT -= dt;

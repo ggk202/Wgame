@@ -94,7 +94,9 @@ export class Builder {
 export class PanelView {
   constructor(root, ctx) {
     this.root = root; this.ctx = ctx; this.open = false; this.builder = null; this.compId = null;
-    root.innerHTML = `<div class="phead"><span class="ptitle"></span><span class="pstat"></span></div><div class="pbody"></div><div class="pscan"></div>`;
+    root.innerHTML = `<div class="phead"><span class="ptitle"></span><span class="pstat"></span></div><div class="pbody"></div><div class="pboot"><pre></pre><div class="pbar"><i></i></div></div><div class="pscan"></div>`;
+    this.boot = root.querySelector('.pboot'); this.bootPre = this.boot.querySelector('pre'); this.bootBar = this.boot.querySelector('.pbar i');
+    this.lastBoot = {};
     this.title = root.querySelector('.ptitle'); this.stat = root.querySelector('.pstat'); this.body = root.querySelector('.pbody');
     const ex = (this.exit = document.createElement('button'));
     ex.id = 'panel-exit'; ex.innerHTML = '◀ EXIT CONSOLE <kbd>ESC</kbd>';
@@ -149,8 +151,31 @@ export class PanelView {
     def.build(this.builder, this.ctx, compId);
     this.root.style.display = 'flex';
     this.open = true;
+    this.startBoot(def.title, compId || def.title);
   }
-  hide() { this.root.style.display = 'none'; this.exit.style.display = 'none'; this.open = false; this.builder = null; this.compId = null; }
+  // CRT power-on + POST text, with relay clicks. Full sequence on a cold console, short one if it was used recently.
+  startBoot(title, key) {
+    clearTimeout(this.bootTimer); (this.bootTimers || []).forEach(clearTimeout);
+    const now = performance.now();
+    const warm = this.lastBoot[key] && now - this.lastBoot[key] < 30000;
+    this.lastBoot[key] = now;
+    const sfx = this.ctx.sfx;
+    const delay = this.mode === 'screen' ? 380 : 0; // wait for the camera to arrive
+    const lines = warm
+      ? [`RESUME ${title}`, 'LINK ........ OK']
+      : ['WOLFRAM PCS FIRMWARE 4.2.17', '(C) MTV-W1 SHIPYARD · SHACKLETON, LUNA', '', 'MEM CHECK ............ 65536K OK', 'RELAY BUS ............ 24/24 SET', 'COOLANT INTERLOCK .... CLOSED', 'DATA LINK ............ OK', '', `LOADING ${title.replace(/[^A-Z0-9]+/gi, '_').toUpperCase()}.SYS`];
+    const step = warm ? 70 : 85, total = delay + 260 + lines.length * step + (warm ? 120 : 420);
+    this.root.classList.add('booting'); this.root.classList.remove('booted');
+    this.boot.style.display = 'flex'; this.bootPre.textContent = ''; this.bootBar.style.width = '0%';
+    this.boot.classList.remove('crt'); void this.boot.offsetWidth;
+    const T = (ms, fn) => this.bootTimers.push(setTimeout(fn, ms));
+    this.bootTimers = [];
+    T(delay, () => { this.boot.classList.add('crt'); if (sfx) { if (!warm) sfx.crtOn(0.9); sfx.relayBank(warm ? 2 : 4, 0.25, 0.9); } });
+    lines.forEach((l, i) => T(delay + 260 + i * step, () => { this.bootPre.textContent += l + '\n'; if (sfx && l && Math.random() < 0.7) sfx.relay(0.55); }));
+    T(delay + 260 + lines.length * step, () => { this.bootBar.style.transition = `width ${warm ? 100 : 380}ms steps(12)`; this.bootBar.style.width = '100%'; if (sfx) sfx.relayBank(warm ? 1 : 3, 0.3, 0.7); });
+    T(total, () => { this.boot.style.display = 'none'; this.root.classList.remove('booting'); this.root.classList.add('booted'); if (sfx) sfx.bootBeep(1); });
+  }
+  hide() { (this.bootTimers || []).forEach(clearTimeout); this.root.style.display = 'none'; this.exit.style.display = 'none'; this.open = false; this.builder = null; this.compId = null; }
   update(S) {
     if (!this.open || !this.builder) return;
     if (this.compId && S.comps[this.compId]) {

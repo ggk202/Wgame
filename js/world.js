@@ -11,6 +11,32 @@ const SEG = 16;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // ---------- live console screens: retro amber/orange phosphor ----------
+const BOOT_LEN = 2.2;
+const BOOT_LINES = ['WOLFRAM PCS FIRMWARE 4.2.17', 'MTV-W1 SHIPYARD  LUNA  2131', 'MEM CHECK ......... 65536K OK', 'RELAY BUS ......... 24/24 SET', 'DATA LINK ......... OK', 'LOADING '];
+function drawBoot(cv, name, t) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const F = (sz, b = '') => `${b}${sz}px "Share Tech Mono", ui-monospace, Menlo, monospace`;
+  g.shadowBlur = 0; g.fillStyle = SBG; g.fillRect(0, 0, W, H);
+  if (t < 0) return;
+  if (t < 0.28) { // CRT warm-up: a bright line that opens vertically
+    const k = t / 0.28, h = Math.max(2, H * k * k);
+    g.fillStyle = `rgba(255,190,120,${1 - k * 0.6})`; g.fillRect(W * 0.5 * (1 - Math.min(1, k * 3)), H / 2 - h / 2, W * Math.min(1, k * 3), h);
+    return;
+  }
+  const fs = Math.max(13, Math.round(W / 24));
+  g.shadowColor = AMB; g.shadowBlur = 6; g.font = F(fs); g.fillStyle = AMB;
+  const n = Math.min(BOOT_LINES.length, Math.floor((t - 0.28) / 0.17) + 1);
+  for (let i = 0; i < n; i++) g.fillText(BOOT_LINES[i] + (i === BOOT_LINES.length - 1 ? name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 14) + '.SYS' : ''), 8, 8 + fs * (i + 1.1));
+  if (t > 1.3) {
+    const k = Math.min(1, (t - 1.3) / 0.6), y = 8 + fs * (BOOT_LINES.length + 1.6);
+    g.strokeStyle = AMB; g.lineWidth = 2; g.strokeRect(8, y, W - 16, fs * 0.8);
+    g.fillRect(10, y + 2, (W - 20) * k, fs * 0.8 - 4);
+  }
+  if (Math.floor(t * 4) % 2 === 0) g.fillRect(8, H - fs - 6, fs * 0.6, fs * 0.9); // cursor
+  if (t > BOOT_LEN - 0.25) { g.fillStyle = `rgba(255,200,140,${(t - (BOOT_LEN - 0.25)) * 3})`; g.fillRect(0, 0, W, H); }
+  g.shadowBlur = 0; g.fillStyle = 'rgba(0,0,0,0.3)';
+  for (let yy = 0; yy < H; yy += 3) g.fillRect(0, yy, W, 1);
+}
 const AMB = '#ff8a1e', AMB_D = '#a8581a', AMB_B = '#ffc27a', SRED = '#ff3b2f', SYEL = '#ffd23f', SBG = '#0a0400';
 function drawScreen(cv, info, st, now) {
   const g = cv.getContext('2d'), W = cv.width, H = cv.height;
@@ -263,14 +289,28 @@ export class World {
       drawScreen(cv, { title: COMPS[id].name.toUpperCase(), lines: [['BOOT', 'OK']] }, 'ok', 0);
     }
   }
-  drawScreens(S, me, now) {
+  drawScreens(S, me, now, onlyBooting = false) {
     for (const id in this.comps) {
       const v = this.comps[id];
       if (!v.canvas || compDeck(id) !== me.deck || id === this.focus) continue;
       const p = v.group.position;
-      if (Math.hypot(p.x - me.x, p.z - me.z) > 16) continue;
+      const dist = Math.hypot(p.x - me.x, p.z - me.z);
+      if (dist > 16) continue;
       const c = S.comps[id];
       const st = c.hp <= 0 ? 'dead' : !c.on || c.pw <= 0 ? 'off' : c.fire > 0 ? 'fire' : COMPS[id].computer && c.fault ? 'fault' : 'ok';
+      // power-on detection: the first time a screen is seen, or when it comes back from dark, it boots
+      const live = st !== 'off' && st !== 'dead';
+      if (v.wasLive === undefined) { v.wasLive = live; if (live) { v.bootAt = now + Math.random() * 1.6; v.bootSnd = false; } }
+      else if (live && !v.wasLive) { v.bootAt = now + Math.random() * 0.8; v.bootSnd = false; }
+      v.wasLive = live;
+      const booting = live && v.bootAt !== undefined && now - v.bootAt < BOOT_LEN;
+      if (onlyBooting && !booting) continue;
+      if (booting) {
+        if (!v.bootSnd && now >= v.bootAt && this.onScreenBoot) { v.bootSnd = true; this.onScreenBoot(id, dist); }
+        drawBoot(v.canvas, COMPS[id].name, now - v.bootAt);
+        v.tex.needsUpdate = true;
+        continue;
+      }
       let info;
       try { info = this.screenInfo ? this.screenInfo(S, id) : null; } catch (e) { info = null; }
       drawScreen(v.canvas, info || { title: COMPS[id].name.toUpperCase(), bars: [['INTEGRITY', c.hp / 100, '']] }, st, now);
@@ -352,8 +392,9 @@ export class World {
     this.point2.position.set(-Math.sin(me.yaw) * 4, baseY + ROOM_H - 0.5, -Math.cos(me.yaw) * 4);
     const red = S.alert === 'red', yel = S.alert === 'yellow';
     const pulse = 0.5 + 0.5 * Math.sin(now * 4);
-    const powerDim = S.power && S.power.gen <= 0 && S.battery.charge <= 0.01 ? 0.35 : 1;
-    const lc = red ? new THREE.Color(1, 0.35 + 0.3 * (1 - pulse), 0.3 + 0.3 * (1 - pulse)) : yel ? new THREE.Color(1, 0.93, 0.78) : new THREE.Color(1, 0.99, 0.96);
+    const blackout = S.power && S.power.gen <= 0 && S.battery.charge <= 0.01;
+    const powerDim = blackout ? 0.22 : 1;
+    const lc = blackout ? new THREE.Color(1, 0.42, 0.22) : red ? new THREE.Color(1, 0.35 + 0.3 * (1 - pulse), 0.3 + 0.3 * (1 - pulse)) : yel ? new THREE.Color(1, 0.93, 0.78) : new THREE.Color(1, 0.99, 0.96);
     const eva = deck === EXT_DECK;
     this.point.color.copy(lc); this.point.intensity = eva ? 0 : 42 * powerDim;
     this.point2.color.copy(lc); this.point2.intensity = eva ? 0 : 16 * powerDim;
@@ -422,6 +463,7 @@ export class World {
 
     this.scrT -= dt;
     if (this.scrT <= 0) { this.scrT = 0.5; this.drawScreens(S, me, now); }
+    else this.drawScreens(S, me, now, true); // booting screens animate every frame
     this.updateBreaches(S, deck, now);
     this.updateItems(S, deck);
     this.updateAvatars(S, me, deck, dt, now);

@@ -265,3 +265,14 @@ body.focused #crosshair, body.focused #hud-prompt, body.focused #hint { display:
 body.focused #hud-ship, body.focused #hud-vitals { opacity: 0.35; }
 body.touch #panel.pv-overlay { width: min(640px, 94vw); max-height: min(80vh, 720px); }
 body.touch #panel .btn { padding: 9px 13px; }
+/* console boot sequence */
+#panel .pboot { display: none; position: absolute; inset: 0; z-index: 2; flex-direction: column; justify-content: flex-start; padding: 18px 20px; background: var(--amb-bg); }
+#panel .pboot pre { margin: 0; font: inherit; font-size: 15px; line-height: 1.5; color: var(--amb); white-space: pre-wrap; }
+#panel .pboot pre::after { content: '█'; animation: blink 0.5s infinite steps(2); }
+#panel .pboot .pbar { margin-top: 12px; height: 16px; border: 2px solid var(--amb); padding: 2px; }
+#panel .pboot .pbar i { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--amb) 0 10px, transparent 10px 13px); }
+#panel .pboot.crt { animation: crton 0.32s ease-out both; }
+@keyframes crton { 0% { transform: scale(0.6, 0.004); filter: brightness(4); } 45% { transform: scale(1, 0.01); filter: brightness(3); } 100% { transform: scale(1, 1); filter: brightness(1); } }
+#panel.booting .pbody, #panel.booting .phead { visibility: hidden; }
+#panel.booted .pbody, #panel.booted .phead { animation: bootflash 0.35s ease-out; }
+@keyframes bootflash { 0% { filter: brightness(2.2) blur(1px); } 100% { filter: none; } }

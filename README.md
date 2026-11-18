@@ -24,7 +24,7 @@ The ship and crew follow an ISS-era, NASA-style look. It's built entirely from p
 
 ## Consoles
 
-Every screen on the ship is live, showing its system's readouts in a retro amber/orange phosphor style. Pressing **E** on a console flies the camera square onto its screen and releases the mouse, so you use the full interface directly on that screen. Leave with the **EXIT CONSOLE** button below it, `Esc` or `E`. Lockers, the lift and the Tab status view open as free-standing terminals in the same style.
+Every screen on the ship is live, showing its system's readouts in a retro amber/orange phosphor style. Pressing **E** on a console flies the camera square onto its screen and releases the mouse, so you use the full interface directly on that screen. Leave with the **EXIT CONSOLE** button below it, `Esc` or `E`. Lockers, the lift and the Tab status view open as free-standing terminals in the same style. Consoles power up with a CRT warm-up and POST boot sequence. Mechanical relays clack while they boot and chatter quietly while idle, and every screen in a room re-boots in a relay cascade when power comes back after a blackout.
 
 ## The ship
 
@@ -84,3 +84,4 @@ tools/build_single.py                  bundles everything into one HTML file (so
 * `?net=local` uses a BroadcastChannel instead of WebRTC, so you can test multiplayer in several tabs of one browser.
 * `?debug=1` enables the debug panel when hosting. It is always on in solo; press `` ` `` in game.
 * The JS console exposes the game as `window.WOLFRAM`.
+* `tools/capture-demo.cjs` renders a deterministic demo video, with offline-rendered game audio, using Playwright and ffmpeg.
