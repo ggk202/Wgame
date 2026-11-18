@@ -61,7 +61,7 @@
     <div id="toast"></div>
     <div id="vote"></div>
     <div id="codebox"></div>
-    <div id="hint">Click to look around · <kbd>H</kbd> help</div>
+    <div id="hint">Click to lock the mouse and look around · <kbd>H</kbd> help</div>
   </div>
   <div id="panel"></div>
   <div id="chat"><div id="chatlog"></div><input id="chatinput" placeholder="Say something to the crew…" maxlength="200"></div>
@@ -72,6 +72,9 @@
       <div id="menu-info" class="desc"></div>
       <button id="btn-resume" class="btn big green">Resume</button>
       <button id="btn-help" class="btn big">How to play</button>
+      <button id="btn-lock" class="btn big">Lock mouse pointer</button>
+      <div class="optrow"><label for="opt-sens">Look sensitivity</label><input id="opt-sens" type="range" min="0.3" max="3" step="0.1"><b id="sens-val"></b></div>
+      <div class="optrow"><label for="opt-invert">Invert vertical look</label><input id="opt-invert" type="checkbox"></div>
       <button id="btn-copycode" class="btn big">Copy join code</button>
       <button id="btn-pause" class="btn big">Pause simulation</button>
       <button id="btn-save" class="btn big">Save game (this browser)</button>
@@ -88,7 +91,7 @@
         <div>
           <h4>Controls</h4>
           <p><kbd>WASD</kbd> move · mouse look (click to capture) · <kbd>Shift</kbd> run<br><kbd>E</kbd> use console / pick up / lift · <kbd>Esc</kbd> close / menu<br><kbd>R</kbd> (hold) repair the thing you look at<br><kbd>F</kbd> (hold) use your item: extinguisher, hull patch, medkit, cartridge<br><kbd>G</kbd> drop item · <kbd>Tab</kbd> (hold) ship status · <kbd>T</kbd> chat · <kbd>1–4</kbd> vote · <kbd>M</kbd> mute</p>
-          <p><b>iPad:</b> left stick to move, drag the right side to look. USE / REPAIR / ITEM buttons act on whatever is in front of you.</p>
+          <p><b>iPad / tablets:</b> left stick to move, drag the right side to look. USE / REPAIR / ITEM buttons act on whatever is in front of you. With a Magic Keyboard, trackpad or mouse, just use it: the game switches to keyboard & mouse controls and clicking the view locks the pointer (or tap MOUSE). Touching the screen brings the touch controls back.</p>
           <h4>The ship (bottom to top)</h4>
           <p><b>Deck 0 Drive</b>: torch drive, drive control, reaction-mass tanks, pellet injector.<br><b>Deck 1 Cargo</b>: fabricator, stores (spare kits!), drone bay (external repairs), torpedo magazine.<br><b>Deck 2 Engineering</b>: fusion reactor, power distribution, battery, thermal control, coolant pumps.<br><b>Deck 3 Habitation</b>: atmosphere control, CO₂ scrubbers, water, hydroponics, medbay, cryo bay, storm shelter.<br><b>Deck 4 Bridge</b>: helm, navigation, sensors, fire control, comms, status board.<br>Use the lift in the centre of every deck. Each deck has a red emergency locker (suits, extinguishers, patches, medkits).<br><b>Exterior (EVA)</b>: suit up, then use the airlock on the Cargo deck to walk the hull spine and repair radiators, PDCs, the railgun, antenna and sensors by hand.</p>
         </div>

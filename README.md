@@ -65,6 +65,8 @@ Desktop: `WASD` move, mouse look (click to capture), `Shift` run, `E` use, `R` (
 
 iPad and tablets: left virtual stick to move, drag the right side to look, and the **USE / REPAIR / ITEM / DROP** buttons.
 
+Keyboards, mice and trackpads work on every device, including an iPad with a Magic Keyboard or Bluetooth mouse. Using one switches to keyboard & mouse controls, and clicking the view locks the pointer. You can also tap **MOUSE** or use Menu → Lock mouse pointer. Touching the screen switches back to touch controls. Where a browser refuses pointer lock, hold the mouse button and drag to look. Look sensitivity and inverted vertical look are in the menu.
+
 ## Development
 
 Plain ES modules, with no build step for the site. Three.js (r160) and PeerJS load from CDNs.

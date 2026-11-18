@@ -5,7 +5,7 @@ import { createState, newPlayer, extDeck } from './state.js';
 import { step } from './sim.js';
 import { applyAction } from './actions.js';
 import { World } from './world.js';
-import { Controller, input } from './player.js';
+import { Controller, input, prefs, savePrefs } from './player.js';
 import { isTouchDevice, setupTouch } from './touch.js';
 import { HUD, PanelView, $, esc } from './ui.js';
 import { PANELS } from './panels.js';
@@ -153,8 +153,14 @@ function enterGame() {
     G.hud = new HUD($('#hud'));
     G.panel = new PanelView($('#panel'), panelCtx());
     G.touchMode = isTouchDevice();
-    G.ctl.bindDesktop($('#view'), { uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen, key: onKey, keyUp: onKeyUp });
-    if (G.touchMode) G.touch = setupTouch(document.body, { button: onTouchButton, unlockAudio: () => G.sfx.unlock() });
+    G.ctl.bindPointer($('#view'), {
+      uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen || $('#help').style.display !== 'none',
+      key: onKey, keyUp: onKeyUp,
+      mouseSeen: () => setInputMode('mouse'), keyboardSeen: () => { if (G.touch) setInputMode('mouse'); },
+      lockChange: (on) => { if (on) setInputMode('mouse'); },
+      lockError: () => G.hud.toast('This browser refused pointer lock. Hold the mouse button and drag to look instead.', 'warn'),
+    });
+    if (G.touchMode) G.touch = setupTouch(document.body, { button: onTouchButton, unlockAudio: () => G.sfx.unlock(), touchSeen: () => setInputMode('touch') });
     document.addEventListener('pointerdown', () => G.sfx.unlock(), { once: false });
     setupMenus();
     requestAnimationFrame(frame);
@@ -170,9 +176,19 @@ function enterGame() {
     logLocal('Welcome aboard the CSV Wolfram. Cargo: a fusion reactor core for Ganymede. Undock from the Helm on the Bridge (Deck 4) via the lift.', 'info');
   }
 }
+// Switch HUD/control layout between touch and keyboard+mouse (e.g. an iPad with a Magic Keyboard or trackpad).
+function setInputMode(mode) {
+  const touch = mode === 'touch' && !!G.touch;
+  if (touch === G.touchMode) return;
+  G.touchMode = touch;
+  document.body.classList.toggle('touch', touch);
+  if (G.touch) { G.touch.show(touch); if (!touch) G.touch.reset(); }
+  if (touch) G.ctl.releaseLock();
+  else G.hud.toast('Keyboard & mouse detected: click the view to lock the pointer (Esc releases it)', '');
+}
 function panelCtx() {
   return {
-    S: () => G.S, me: () => meView(), act, click: () => G.sfx.play('click'), touch: G.touchMode,
+    S: () => G.S, me: () => meView(), act, click: () => G.sfx.play('click'), get touch() { return G.touchMode; },
     local: (a, args) => { if (a === 'local.lift') rideLift(args.deck); if (a === 'local.eva') cycleAirlock(args.out); },
     closePanel: () => closePanel(),
   };
@@ -196,7 +212,7 @@ function openPanel(kind, compId) {
   G.panelKind = kind; G.panelComp = compId || null;
   document.body.classList.add('panel-open');
   if (compId) act('seat', { id: compId });
-  if (document.pointerLockElement) document.exitPointerLock();
+  G.ctl.releaseLock();
   G.panel.update(G.S);
 }
 function closePanel() {
@@ -254,6 +270,12 @@ function onTouchButton(name) {
   if (name === 'status') { G.panel.open && G.panelKind === 'status' ? closePanel() : openPanel('status'); }
   else if (name === 'menu') toggleMenu();
   else if (name === 'chat') openChat();
+  else if (name === 'mouse') lockMouse();
+}
+function lockMouse() {
+  setInputMode('mouse');
+  if (G.ctl.lockFailed || !G.ctl.lockSupported) { G.hud.toast('Pointer lock is not available here. Hold the mouse button and drag to look.', 'warn'); return; }
+  G.ctl.requestLock();
 }
 
 // ---------------- interaction ----------------
@@ -368,7 +390,7 @@ function frame(tms) {
   if (G.hudT <= 0) { G.hudT = 0.1; G.hud.update(S, meView(), G.focus, { act, touch: G.touchMode }); }
   G.panelT -= dt;
   if (G.panelT <= 0) { G.panelT = 0.2; G.panel.update(S); }
-  $('#hint').style.display = !G.touchMode && !G.ctl.locked && !G.panel.open && !G.menuOpen && !G.chatOpen ? '' : 'none';
+  $('#hint').style.display = !G.touchMode && !G.ctl.locked && !G.ctl.dragLook && !G.panel.open && !G.menuOpen && !G.chatOpen ? '' : 'none';
   if (S.phase !== 'play' && !G.ended) showEnd(S.phase === 'won' ? 'MISSION COMPLETE' : 'MISSION FAILED', S.endReason, S);
 }
 function pushMyPos(force) {
@@ -399,6 +421,11 @@ function setupMenus() {
   $('#btn-debug').onclick = () => { toggleMenu(false); openPanel('debug'); };
   $('#btn-endlobby').onclick = () => location.reload();
   $('#help-close').onclick = () => toggleHelp(false);
+  $('#btn-lock').onclick = () => { toggleMenu(false); lockMouse(); };
+  const sens = $('#opt-sens'), inv = $('#opt-invert');
+  sens.value = prefs.sens; $('#sens-val').textContent = prefs.sens.toFixed(1) + '×'; inv.checked = !!prefs.invertY;
+  sens.oninput = () => { prefs.sens = +sens.value; $('#sens-val').textContent = prefs.sens.toFixed(1) + '×'; savePrefs(); };
+  inv.onchange = () => { prefs.invertY = inv.checked; savePrefs(); };
   $('#chatinput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { const t = e.target.value.trim(); if (t) sendChat(t); e.target.value = ''; closeChat(); }
     if (e.key === 'Escape') closeChat();
@@ -409,7 +436,7 @@ function toggleMenu(v) {
   G.menuOpen = v === undefined ? !G.menuOpen : v;
   $('#menu').style.display = G.menuOpen ? 'flex' : 'none';
   if (G.menuOpen) {
-    if (document.pointerLockElement) document.exitPointerLock();
+    G.ctl.releaseLock();
     const host = G.role !== 'client';
     $('#btn-save').style.display = host ? '' : 'none';
     $('#btn-export').style.display = host ? '' : 'none';
@@ -418,8 +445,8 @@ function toggleMenu(v) {
     $('#menu-info').innerHTML = G.role === 'host' ? `Join code: <b>${G.code}</b> · ${G.net ? G.net.count : 0} crew connected` : G.role === 'client' ? `Connected to ${G.code}` : (ART ? 'Solo debug build: the simulation is paused while this menu is open.' : 'Solo: paused while this menu is open.');
   }
 }
-function toggleHelp(v) { const el = $('#help'); const on = v === undefined ? el.style.display === 'none' : v; el.style.display = on ? 'flex' : 'none'; if (on && document.pointerLockElement) document.exitPointerLock(); }
-function openChat() { if (G.role === 'solo') return; G.chatOpen = true; $('#chat').classList.add('open'); if (document.pointerLockElement) document.exitPointerLock(); setTimeout(() => $('#chatinput').focus(), 0); }
+function toggleHelp(v) { const el = $('#help'); const on = v === undefined ? el.style.display === 'none' : v; el.style.display = on ? 'flex' : 'none'; if (on) G.ctl.releaseLock(); }
+function openChat() { if (G.role === 'solo') return; G.chatOpen = true; $('#chat').classList.add('open'); G.ctl.releaseLock(); setTimeout(() => $('#chatinput').focus(), 0); }
 function closeChat() { G.chatOpen = false; $('#chat').classList.remove('open'); $('#chatinput').blur(); }
 function sendChat(text) {
   if (G.role === 'client') G.net.send({ t: 'chat', text });
@@ -436,7 +463,7 @@ function showChat(m) {
 function showEnd(title, text, S) {
   G.ended = true;
   closePanel();
-  if (document.pointerLockElement) document.exitPointerLock();
+  G.ctl.releaseLock();
   $('#end').style.display = 'flex';
   $('#end-title').textContent = title;
   $('#end-text').textContent = text || '';
