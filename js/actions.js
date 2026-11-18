@@ -10,6 +10,7 @@ import { PARTS, PART_IDS, repairNeeds, missingParts, moduleOf } from './repair.j
 import { beginRendezvous, ORBIT } from './flight.js';
 import { BUNKS, bunkPos, BUNK_REACH, EXPERIMENTS, SCI_COST, BAY_IDS, replyHail, podState, POD, POD_CRADLE, deliverCargo, SCOUT } from './crew.js';
 import { EXT, AIRLOCK } from './config.js';
+import { ANCHORS } from './hull.js';
 
 const toast = (S, p, text) => fx(S, 'toast', { to: p.id, text });
 const dist2 = (p, x, z, y = 0) => Math.hypot(p.x - x, p.z - z, Math.max(0, Math.abs((p.y || 0) - y) - 1.2));
@@ -100,7 +101,8 @@ export function applyAction(S, pid, a, args = {}) {
       if (P.pilot !== p.id) return;
       const dc = Math.hypot(P.x - POD_CRADLE.x, P.y - POD_CRADLE.y, P.z - POD_CRADLE.z);
       const dh = Math.hypot(P.x - EXT.hatch.x, P.y - EXT.hatch.y, P.z - EXT.hatch.z);
-      if (dc > POD.deliver && dh > EXT.tether - 5) return err('Too far from the hatch to clip on a tether. Fly back first.');
+      const da = Math.min(...ANCHORS.map((a) => Math.hypot(P.x - a.x, P.y - a.y, P.z - a.z)));
+      if (dc > POD.deliver && dh > EXT.tether - 5 && da > EXT.tether - 5) return err('Too far from any tether point to step out safely. Fly closer to the hull first.');
       if (dc <= POD.deliver) {
         if (P.carry) { const c = (S.cargo || []).find((x) => x.id === P.carry); P.carry = null; if (c) deliverCargo(S, c); }
         P.at = 'cradle'; Object.assign(P, { x: POD_CRADLE.x, y: POD_CRADLE.y, z: POD_CRADLE.z, vz: 0 });

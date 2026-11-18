@@ -1,4 +1,5 @@
 // Local first-person controller, keyboard/mouse input and interaction targeting.
+import { ANCHORS, tetherSnag, tetherClear, tetherInRing, ringSDF } from './hull.js';
 import { BUNKS, bunkPos, BUNK_REACH, podState, POD, POD_CRADLE, SCOUT } from './crew.js';
 import { COMPS, COMP_IDS, LOCKERS, LIFT_A, ROOM_R, ROOM_H, DECK_H, SHAFT_R, RAIL_H, EYE, PLAYER_H, ITEMS, DECKS, EXT_DECK, EXT, AIRLOCK, RING, RING_DECK, G0 } from './config.js';
 import { polar, compPos, compDeck, clamp } from './util.js';
@@ -34,7 +35,7 @@ export class Controller {
     this.sens = 0.0022;
     this.keys = {};
   }
-  setFrom(p) { this.ladder = false; this.x = p.x; this.y = p.y || 0; this.z = p.z; this.deck = p.deck; this.yaw = p.yaw ?? this.yaw; this.vx = this.vy = this.vz = 0; }
+  setFrom(p) { this.ladder = false; this.teth = null; this.x = p.x; this.y = p.y || 0; this.z = p.z; this.deck = p.deck; this.yaw = p.yaw ?? this.yaw; this.vx = this.vy = this.vz = 0; }
 
   // Mouse / trackpad / keyboard on any device (desktop, iPad with Magic Keyboard or mouse, Android, ...).
   bindPointer(canvas, hooks) {
@@ -193,7 +194,7 @@ export class Controller {
     if (gG < 0.3) speed *= 0.55 + gG * 1.5; // low gravity: long, careful strides
     // the floor normal is the dominant gravity axis; any sideways component (thrust inside the spinning ring) is a slope
     let side = 0;
-    if (this.deck === RING_DECK) { const k = Math.abs(G[0]) / Math.max(0.01, Math.abs(G[1])); speed *= clamp(1.1 - k, 0.2, 1); side = k > 0.55 ? Math.sign(G[0]) * (k - 0.55) * 2.5 : 0; }
+    if (this.deck === RING_DECK) { const k = Math.abs(G[0]) / Math.max(0.01, Math.abs(G[1])); speed *= clamp(1 - 0.25 * Math.min(k, 2), 0.55, 1); side = k > 0.7 ? Math.sign(G[0]) * Math.min(1.2, (k - 0.7) * 0.8) : 0; }
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw), rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     let mx = fx * fwd + rx * right, mz = fz * fwd + rz * right;
     const l = Math.hypot(mx, mz); this.moving = l > 0.1 && this.y <= 0.05; if (l > 1) { mx /= l; mz /= l; }
@@ -297,15 +298,71 @@ export class Controller {
       const n = hullNormal(p.x, p.y, p.z), vn = this.vx * n[0] + this.vy * n[1] + this.vz * n[2];
       if (vn < 0) { if (-vn > 3) this.land(-vn + 2.5); this.vx -= vn * n[0]; this.vy -= vn * n[1]; this.vz -= vn * n[2]; }
     }
-    // safety tether from the hatch
-    const H = EXT.hatch, dx = p.x - H.x, dy = p.y - H.y, dz = p.z - H.z, d = Math.hypot(dx, dy, dz);
-    if (d > EXT.tether) { const k = EXT.tether / d; p.x = H.x + dx * k; p.y = H.y + dy * k; p.z = H.z + dz * k; const vr = (this.vx * dx + this.vy * dy + this.vz * dz) / d; if (vr > 0) { this.vx -= (vr * dx) / d; this.vy -= (vr * dy) / d; this.vz -= (vr * dz) / d; } }
-    this.tether = d / EXT.tether;
+    this.ringHazard(dt, S, p);
+    this.tetherStep(dt, S, p);
     this.x = p.x; this.y = p.y - EYE; this.z = p.z;
     this.moving = al > 0.1;
     this.jetting = al > 0.1;
   }
 
+  // ---- the safety tether: a real line from the last clip point, which wraps round the hull and can snag ----
+  clipTo(i) { this.teth = { a: i, wraps: [], snapped: false }; }
+  nearestAnchor(p) { let best = 0, bd = 1e9; ANCHORS.forEach((a, i) => { const d = Math.hypot(a.x - p.x, a.y - p.y, a.z - p.z); if (d < bd) { bd = d; best = i; } }); return best; }
+  tetherPoints() { // anchor, wrap points, then the crew member's harness
+    const T = this.teth; if (!T || T.snapped) return null;
+    return [ANCHORS[T.a], ...T.wraps, { x: this.x, y: this.y + EYE - 0.55, z: this.z }];
+  }
+  tetherStep(dt, S, p) {
+    if (!this.teth) this.clipTo(this.nearestAnchor(p));
+    const T = this.teth;
+    if (T.snapped) { this.tether = 0; return; }
+    const harness = { x: p.x, y: p.y - 0.55, z: p.z };
+    // the line slides off a corner as soon as it can run straight
+    while (T.wraps.length) { const prev = T.wraps.length > 1 ? T.wraps[T.wraps.length - 2] : ANCHORS[T.a]; if (tetherClear(prev, harness)) T.wraps.pop(); else break; }
+    // and catches on the hull when it can't
+    const last0 = T.wraps.length ? T.wraps[T.wraps.length - 1] : ANCHORS[T.a];
+    const snag = T.wraps.length < 12 ? tetherSnag(last0, harness) : null;
+    if (snag) T.wraps.push(snag);
+    const pts = [ANCHORS[T.a], ...T.wraps];
+    let used = 0; for (let i = 1; i < pts.length; i++) used += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y, pts[i].z - pts[i - 1].z);
+    const last = pts[pts.length - 1], rem = Math.max(0.6, EXT.tether - used);
+    const dx = harness.x - last.x, dy = harness.y - last.y, dz = harness.z - last.z, d = Math.hypot(dx, dy, dz);
+    if (d > rem) { // taut: you swing on the line
+      const k = rem / d; p.x = last.x + dx * k; p.y = last.y + dy * k + 0.55; p.z = last.z + dz * k;
+      const vr = (this.vx * dx + this.vy * dy + this.vz * dz) / d; if (vr > 0) { this.vx -= (vr * dx) / d; this.vy -= (vr * dy) / d; this.vz -= (vr * dz) / d; }
+      if (vr > 3 && this.onEvent) this.onEvent('Tether snapped taut!');
+    }
+    this.tether = Math.min(1, (used + Math.min(d, rem)) / EXT.tether);
+    this.tWraps = T.wraps.length;
+    // a line across the spinning ring gets grabbed by it
+    const spin = S && S.ring && S.ring.g > 0.02;
+    if (spin) {
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = i + 1 < pts.length ? pts[i + 1] : harness, hit = tetherInRing(a, b);
+        if (!hit) continue;
+        const w = Math.sqrt((S.ring.g * 9.81) / 25.5), rr = Math.max(1, Math.hypot(hit.x, hit.y)), v = w * rr;
+        // yanked toward the snag along the ring's direction of travel, then the line parts
+        const tx = -hit.y / rr, ty = hit.x / rr, toX = hit.x - p.x, toY = hit.y - p.y, toZ = hit.z - p.z, tl = Math.hypot(toX, toY, toZ) || 1;
+        this.vx = (toX / tl) * v * 0.6 + tx * v * 0.4; this.vy = (toY / tl) * v * 0.6 + ty * v * 0.4; this.vz = (toZ / tl) * v * 0.6;
+        T.snapped = true; T.wraps = [];
+        this.land(v * 0.7 + 4);
+        if (this.onEvent) this.onEvent('TETHER CAUGHT IN THE SPINNING RING — it snapped! You are free-floating: jet to a tether point and clip on (E).', 'bad');
+        return;
+      }
+    }
+  }
+  // touching the spinning ring at speed is an accident: it slams you and throws you along its rim
+  ringHazard(dt, S, p) {
+    this.ringHitT = Math.max(0, (this.ringHitT || 0) - dt);
+    if (!S || !S.ring || S.ring.g <= 0.02 || this.ringHitT > 0) return;
+    if (ringSDF(p.x, p.y, p.z) > 0.75) return;
+    const w = Math.sqrt((S.ring.g * 9.81) / 25.5), rr = Math.max(1, Math.hypot(p.x, p.y)), v = w * rr;
+    const tx = -p.y / rr, ty = p.x / rr, ox = p.x / rr, oy = p.y / rr;
+    this.vx = tx * v * 0.8 + ox * 2.5; this.vy = ty * v * 0.8 + oy * 2.5; this.vz += (Math.random() - 0.5) * 2;
+    this.ringHitT = 1.5;
+    this.land(v + 3);
+    if (this.onEvent) this.onEvent(`Struck by the centrifuge ring at ${v.toFixed(1)} m/s! Stay clear of it while it spins.`, 'bad');
+  }
   // The work pod and the ghosts' scout drone: free flight with real momentum, no tether. The pod bumps off the hull
   // (2 m clearance) and, like anyone outside, is pushed aft when the ship accelerates under it.
   flyCraft(dt, S, fwd, right, up, P, hull, G) {
@@ -328,6 +385,7 @@ export class Controller {
         if (vn < 0) { if (-vn > 4) this.land(-vn + 1.5); this.vx -= vn * n[0] * 1.3; this.vy -= vn * n[1] * 1.3; this.vz -= vn * n[2] * 1.3; }
       }
     } else hullPush(p, 0.8);
+    if (hull) this.ringHazard(dt, S, p);
     const d = Math.hypot(p.x, p.y, p.z); if (d > P.range) { const k = P.range / d; p.x *= k; p.y *= k; p.z *= k; }
     this.x = p.x; this.y = p.y - EYE; this.z = p.z;
     this.moving = al > 0.1; this.jetting = al > 0.1; this.speed = sp;
@@ -358,7 +416,7 @@ export class Controller {
     }
     if (D === RING_DECK) {
       const C = 2 * Math.PI * RING.R;
-      for (const a of RING.spokes) { let z = (a / 360) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'spoke', id: 'spoke', label: 'Spoke ladder to the hub' }, 0, RING.H - 0.3, z, 3.2, 1.2); }
+      for (const a of RING.spokes) { let z = (a / 360) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'spoke', id: 'spoke', label: 'Spoke ladder to the hub' }, 0, 1.8, z, 4.6, 1.6); }
       for (let i = 0; i < RING.bays; i++) { let z = ((i + 0.5) / RING.bays) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; for (const s of [-1, 1]) { const bid = 'bay' + (i * 2 + (s > 0 ? 1 : 0)), run = S.sci && S.sci.bays[bid]; consider({ kind: 'bay', id: bid, label: `Science Bay ${i * 2 + (s > 0 ? 2 : 1)}${run ? ' — ' + Math.round(run.p * 100) + '%' : ' (empty)'}` }, s * (RING.W / 2 - 0.4), 1.2, z, 2.4); } }
       for (const b of BUNKS) if (b.deck === RING_DECK) { let z = b.z; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'bunk', id: b.id, label: b.label }, b.x, 0.5, z, BUNK_REACH + 0.6, 0.9); }
       return best;
@@ -379,6 +437,7 @@ export class Controller {
       }
       if (P.at !== 'lost' && !P.pilot) consider({ kind: 'pod', id: 'pod', label: P.at === 'cradle' ? 'Work pod (in its cradle)' : 'Work pod' }, P.x, P.y, P.z, 4.2, 1.0);
       consider({ kind: 'hatch', id: 'hatch', label: 'Airlock hatch' }, EXT.hatch.x, EXT.hatch.y, EXT.hatch.z, 3.2, 0.9);
+      ANCHORS.forEach((a, i) => { if (i && !(this.teth && this.teth.a === i && !this.teth.snapped)) consider({ kind: 'anchor', id: 'a' + i, idx: i, label: `Tether point (${a.name})` }, a.x, a.y, a.z, 2.6, 1.0); });
       if (!best && me.item && me.item.type === 'patch' && S.hull < 100 && hullSDF(this.x, this.y + EYE, this.z) < 2.2) best = { kind: 'hull', id: 'hull', label: 'Hull plating', d: 1 };
       return best;
     }

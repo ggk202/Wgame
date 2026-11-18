@@ -165,7 +165,7 @@ function hostOnMsg(pid, m) {
   }
   const p = S.players[pid];
   if (!p) return;
-  if (m.t === 'pos') { if (p.state !== 'dead' || p.ghost === 'scout') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, RING_DECK); p.yaw = m.y; } }
+  if (m.t === 'pos') { if (p.state !== 'dead' || p.ghost === 'scout') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, RING_DECK); p.yaw = m.y; p.teth = Array.isArray(m.tp) ? m.tp.slice(0, 16) : null; p.tsnap = !!m.sn; } }
   else if (m.t === 'act') applyAction(S, pid, m.a, m.args || {});
   else if (m.t === 'chat') { const msg = { t: 'chat', from: p.name, color: p.color, text: String(m.text).slice(0, 200) }; G.net.broadcast(msg); showChat(msg); }
 }
@@ -225,6 +225,7 @@ function enterGame() {
   }
   const me = G.S.players[G.myId];
   G.ctl.setFrom(me);
+  G.ctl.onEvent = (t, k) => { G.hud.toast(t, k || 'warn'); if (k === 'bad') G.sfx.play('shipwarn'); };
   G.ctl.onImpact = (v) => { act('impact', { v }); G.sfx.play('hit'); if (G.world) G.world.shake = Math.min(1.5, v / 8); };
   G.lastTp = me.tp;
   $('#codebox').textContent = G.role === 'host' ? `JOIN CODE ${G.code}` : G.role === 'client' ? `CREW · ${G.code}` : 'SOLO';
@@ -266,7 +267,7 @@ function act(a, args = {}) {
 function meView() {
   const p = G.S && G.S.players[G.myId];
   if (!p) return null;
-  return { ...p, x: G.ctl.x, y: G.ctl.y, z: G.ctl.z, deck: G.ctl.deck, yaw: G.ctl.yaw, pitch: G.ctl.pitch, moving: G.ctl.moving, fl: G.ctl.fl, tether: G.ctl.tether };
+  return { ...p, x: G.ctl.x, y: G.ctl.y, z: G.ctl.z, deck: G.ctl.deck, yaw: G.ctl.yaw, pitch: G.ctl.pitch, moving: G.ctl.moving, fl: G.ctl.fl, tether: G.ctl.tether, tWraps: G.ctl.tWraps, tsnap: !!(G.ctl.teth && G.ctl.teth.snapped) && G.ctl.deck === EXT_DECK, teth: G.ctl.deck === EXT_DECK && G.ctl.tetherPoints() ? G.ctl.tetherPoints().map((q) => [q.x, q.y, q.z]) : null };
 }
 function logLocal(text, kind = 'info') { if (G.hud) G.hud.addLog(text, kind); }
 
@@ -385,6 +386,7 @@ function handleInteraction(dt) {
     input.use = false;
     if (G.panel.open && G.touchMode) closePanel();
     else if (me.pod && !blocked && !f) act('pod.exit');
+    else if (!f && !blocked && G.ctl.deck === RING_DECK) { const C = 2 * Math.PI * RING.R; if (RING.spokes.some((a) => { let dz = Math.abs(G.ctl.z - (a / 360) * C); dz = Math.min(dz, C - dz); return dz < 4; })) rideLift(3); }
     else if (f && !blocked) {
       if (me.pod && f.kind === 'comp') openPanel('extcomp', f.id);
       else if (f.kind === 'comp') openPanel(COMPS[f.id].panel || 'extcomp', f.id);
@@ -397,6 +399,7 @@ function handleInteraction(dt) {
       else if (f.kind === 'bay') openPanel('science', f.id);
       else if (f.kind === 'bunk') act('sleep', { bunk: f.id });
       else if (f.kind === 'pod') act('pod.board');
+      else if (f.kind === 'anchor') { G.ctl.clipTo(f.idx); G.sfx.click && G.sfx.click(0.6, 0, 2500); G.hud.toast(`Tether clipped to ${f.label.replace('Tether point (', '').replace(')', '')}`, 'good'); }
     }
   }
   if (G.touch && G.touch.setFloat) G.touch.setFloat(G.ctl.fl || G.ctl.deck === EXT_DECK);
@@ -429,7 +432,7 @@ function handleInteraction(dt) {
   } else if (!blocked && !f && input.item && me.item && me.item.type === 'medkit' && G.workT <= 0) { G.workT = 0.5; act('work', { kind: 'medkit', target: null }); input.item = false; }
   if (G.touch) {
     G.touch.setLabels({
-      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : f.kind === 'bunk' ? 'SLEEP' : f.kind === 'pod' ? 'BOARD' : 'USE') : (me.pod ? 'EXIT POD' : G.panel.open ? 'CLOSE' : ''),
+      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : f.kind === 'bunk' ? 'SLEEP' : f.kind === 'pod' ? 'BOARD' : f.kind === 'anchor' ? 'CLIP ON' : 'USE') : (me.pod ? 'EXIT POD' : G.panel.open ? 'CLOSE' : ''),
       repair: f && f.kind === 'comp' && S.comps[f.id].hp < 100 ? 'REPAIR' : '',
       item: me.pod ? (podState(S).carry ? 'RELEASE' : 'GRAB') : me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : me.item.type === 'tablet' ? 'TABLET' : 'REPAIR') : '',
       drop: me.item ? 'DROP' : '',
@@ -479,7 +482,7 @@ function frame(tms) {
   const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || (G.repair && G.repair.open) || (G.tablet && G.tablet.open);
   G.ctl.update(dt, S, me, blocked);
   if (G.role !== 'client') {
-    if (me) { me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; me.pitch = G.ctl.pitch; me.fl = G.ctl.fl; }
+    if (me) { const tp = G.ctl.deck === EXT_DECK ? G.ctl.tetherPoints() : null; me.teth = tp ? tp.map((q) => [q.x, q.y, q.z]) : null; me.tsnap = !!(G.ctl.teth && G.ctl.teth.snapped) && G.ctl.deck === EXT_DECK; me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; me.pitch = G.ctl.pitch; me.fl = G.ctl.fl; }
     const paused = S.paused || (G.role === 'solo' && G.menuOpen);
     if (!paused) {
       G.simAcc += rdt;
@@ -536,7 +539,8 @@ function frame(tms) {
 function pushMyPos(force) {
   if (G.role !== 'client' || !G.net) { const me = G.S && G.S.players[G.myId]; if (me) { me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.fl = G.ctl.fl; } return; }
   G.posT = 0.066;
-  G.net.send({ t: 'pos', x: G.ctl.x, z: G.ctl.z, h: G.ctl.y, f: G.ctl.fl ? 1 : 0, p: G.ctl.pitch, d: G.ctl.deck, y: G.ctl.yaw });
+  const tp = G.ctl.deck === EXT_DECK ? G.ctl.tetherPoints() : null;
+  G.net.send({ t: 'pos', x: G.ctl.x, z: G.ctl.z, h: G.ctl.y, f: G.ctl.fl ? 1 : 0, p: G.ctl.pitch, d: G.ctl.deck, y: G.ctl.yaw, tp: tp ? tp.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2), +q.z.toFixed(2)]) : null, sn: G.ctl.teth && G.ctl.teth.snapped ? 1 : 0 });
 }
 function autosave() {
   if (!G.S || G.role === 'client' || G.S.phase !== 'play' || G.S.tutorial) return;

@@ -112,3 +112,44 @@ export function pdcCanSee(id, d) {
   for (const s of [2, 4, 7, 11, 16, 24, 35, 50, 70]) if (hullSDF(p[0] + d[0] * s, p[1] + d[1] * s, p[2] + d[2] * s) < 0.15) return false;
   return true;
 }
+
+// ---------------- the spinning centrifuge ring, for collisions ----------------
+export function ringSDF(x, y, z) { return sdRing(x, y, z); }
+
+// ---------------- tether attachment points ----------------
+// Hard points with clip rings all along the hull. Anchor 0 is the airlock hatch. A crew member's tether runs from the
+// last point they clipped to; to work further away they hop from point to point.
+export const ANCHORS = (() => {
+  const out = [{ x: 16.2 + 0.3, y: 1.4, z: -42, name: 'EVA hatch' }];
+  const zs = [-93, -86, -77, -66.5, -53, -32, -20, -8, 4, 16, 29];
+  const names = { 0: 'dorsal', 90: 'starboard', 180: 'ventral', 270: 'port' };
+  zs.forEach((z, i) => {
+    for (const a of i % 2 ? [90, 270] : [0, 180]) {
+      const r = (a * Math.PI) / 180, dx = Math.sin(r), dy = Math.cos(r);
+      let k = 0; while (k < 30 && hullSDF(dx * k, dy * k, z) < 0.35) k += 0.1;
+      // keep clear of the ring and its arms
+      if (Math.abs(z - SL.ringZ) < SL.ringHW + 1 && k > SL.hubR + 0.5) continue;
+      out.push({ x: dx * k, y: dy * k, z, name: `${names[a]} · station ${Math.round(z)}` });
+    }
+  });
+  return out;
+})();
+// first point on the segment a→b that is inside the hull (skipping the ends), pushed back out to the surface
+export function tetherSnag(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz);
+  if (L < 0.8) return null;
+  const n = Math.ceil(L / 0.5);
+  for (let i = 1; i < n; i++) {
+    const t = i / n, x = a.x + dx * t, y = a.y + dy * t, z = a.z + dz * t;
+    if (L * t < 0.5 || L * (1 - t) < 0.6) continue;
+    if (hullSDF(x, y, z) < 0.05) { const p = { x, y, z }; hullPush(p, 0.35); return p; }
+  }
+  return null;
+}
+export const tetherClear = (a, b) => !tetherSnag(a, b);
+// does the segment pass through the ring's swept volume?
+export function tetherInRing(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz), n = Math.max(2, Math.ceil(L / 0.7));
+  for (let i = 0; i <= n; i++) { const t = i / n; const x = a.x + dx * t, y = a.y + dy * t, z = a.z + dz * t; if (sdRing(x, y, z) < 0.45) return { x, y, z }; }
+  return null;
+}

@@ -12,6 +12,7 @@ import { SL } from './hull.js';
 import { qrot, qconj } from './attitude.js';
 import { projBodyDir } from './combat.js';
 import { podState, POD_CRADLE } from './crew.js';
+import { ANCHORS } from './hull.js';
 
 // ---- small craft and cargo outside the hull ----
 function buildWorkPod() {
@@ -354,7 +355,7 @@ export class World {
   // ---------------- per-frame update ----------------
   update(S, me, dt, now, ctl) {
     if (!S || !me) return;
-    this._meId = me.id;
+    this._meId = me.id; this._meTeth = me.deck === EXT_DECK ? me.teth : null;
     if (!this.cockpit) { // the inside of the work pod, around the pilot's head
       const c = this.cockpit = new THREE.Group(), fm = new THREE.MeshBasicMaterial({ color: 0x3a4048 }), lm = new THREE.MeshBasicMaterial({ color: 0xff8a1e });
       for (const [x, y, rz] of [[-0.55, 0, 0.2], [0.55, 0, -0.2]]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.025, 1.4, 0.025), fm); st.position.set(x * 1.15, y, -0.7); st.rotation.z = rz; c.add(st); }
@@ -686,6 +687,34 @@ export class World {
       m.position.set(p.x, (p.y || 0) + EYE, p.z); m.rotation.y = (p.yaw || 0) + now * 0.2;
     }
     for (const id in this.scouts) if (!sc.has(id)) { ex.remove(this.scouts[id]); delete this.scouts[id]; }
+    // tether points: a yellow clip ring on a stub post at every hard point
+    if (!this.anchorMeshes) {
+      this.anchorMeshes = new THREE.Group(); ex.add(this.anchorMeshes);
+      const ringM = mat(0xf0c020, 0.4, 0.6), postM = mat(0x8a9098, 0.4, 0.8);
+      ANCHORS.forEach((a, i) => {
+        const g = new THREE.Group(); g.position.set(a.x, a.y, a.z);
+        const n = new THREE.Vector3(a.x, a.y, 0).normalize(); if (!isFinite(n.x)) n.set(0, 1, 0);
+        g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), i === 0 ? new THREE.Vector3(1, 0, 0) : n);
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 0.5, 8), postM); post.position.y = -0.2; g.add(post);
+        const r = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 8, 18), ringM); r.position.y = 0.08; g.add(r);
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0x40ff60 })); lamp.position.set(0.12, -0.1, 0); g.add(lamp);
+        this.anchorMeshes.add(g);
+      });
+    }
+    // tethers: a line from the clip point, round the hull where it has snagged, to each crew member's harness
+    this.tethers = this.tethers || {};
+    const tseen = new Set();
+    const lines = [];
+    for (const p of Object.values(S.players)) { const pts = p.id === meId ? this._meTeth : p.deck === EXT_DECK && !p.pod ? p.teth : null; if (pts && pts.length > 1) lines.push([p.id, pts]); }
+    for (const [id, pts] of lines) {
+      tseen.add(id);
+      let L = this.tethers[id];
+      if (!L) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(16 * 3), 3)); L = this.tethers[id] = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffd040 })); L.frustumCulled = false; ex.add(L); }
+      const a = L.geometry.attributes.position, n = Math.min(16, pts.length);
+      for (let i = 0; i < n; i++) a.setXYZ(i, pts[i][0], pts[i][1], pts[i][2]);
+      a.needsUpdate = true; L.geometry.setDrawRange(0, n); L.visible = true;
+    }
+    for (const id in this.tethers) if (!tseen.has(id)) this.tethers[id].visible = false;
   }
   updateExterior(S, now, dt) {
     this._S = S;

@@ -134,6 +134,10 @@ Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at th
   - seized bearings wear the module faster;
   - cracks fatigue the hull.
   An overheated engineering deck degrades the battery. Ship Status lists active cascades.
+- **EVA tether.** The safety line is 40 m long. It runs from the last tether point you clipped to, wraps round the hull and catches on corners, so the reach you have left depends on the route it takes. It slides free again once it can run straight. Twenty-three yellow tether points line the hull: fly to one and press `E` to clip on there.
+  - Hitting the spinning centrifuge ring throws you along its rim and hurts.
+  - A tether that crosses the spinning ring gets grabbed, yanks you and snaps, leaving you free-floating until you clip on again.
+  - If the ship burns while your tether is cut, you're left behind.
 - **The work pod.** A small pressurised craft in a cradle beside the EVA hatch. Board it on EVA with `E`. It flies four times harder than the jet pack and has no tether. `F` grapples and releases cargo, and `G` exits. Repairs work from 8 m. Bring back drifting salvage containers (parts and credits) and damaged drones before they drift away. Under thrust the ship leaves the pod behind.
 - **Ghost jobs.** Thawing a backup crew member takes 45 s. Meanwhile `V` switches between a free camera, a scout drone (it sharpens sensor locks and point defence while it is out) and the external camera net.
 - **Maintenance tablet.** Take one from any emergency locker and press `F`. It shows a crude phosphor-green 3D wireframe of the whole ship, with every module coloured by state (OK, damaged, critical, dead, fire, computer fault, off), crew positions and breaches. Drag to turn it, zoom with the wheel or a pinch, and tap a module for its fault, the parts it needs and what's in stores. The other pages show crew (location, health, fatigue), nav (phase, capture/rendezvous, slot, hazards, unanswered hails) and stores (parts, consumables, running experiments).

@@ -492,7 +492,8 @@ function updatePlayers(S, dt) {
       p.dose += (rad * dt) / 1000;
       if (p.dose > 5) { dmg += (p.dose - 5) * 0.6; cause = 'radiation sickness'; }
       if (S.drive.g > 2.2 && !p.seat) { dmg += (S.drive.g - 2.2) * 3; cause = 'high-g trauma'; }
-      if (p.deck === EXT_DECK && S.drive.g > EXT.maxG) {
+      if (p.deck === EXT_DECK && S.drive.g > EXT.maxG && p.tsnap && !p.pod) { killPlayer(S, p, 'left behind in space when the ship burned with their tether cut'); continue; }
+      if (p.deck === EXT_DECK && S.drive.g > EXT.maxG && !p.pod) {
         // nobody can hang on to the hull under thrust: the safety tether's reel hauls the crew member back into the airlock
         const ap = airlockInside();
         Object.assign(p, { deck: AIRLOCK.deck, x: ap.x, z: ap.z, tp: p.tp + 1, seat: null });

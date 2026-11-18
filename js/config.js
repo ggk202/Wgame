@@ -101,7 +101,7 @@ export const LIFT_A = 180;
 // Exterior (EVA). Players outside have deck = EXT_DECK and fly a SAFER-style jet pack, clipped to a safety tether.
 // Coordinates are the ship frame (x starboard, y dorsal, z aft). Any thrust above maxG reels the tether in.
 export const EXT_DECK = 5;
-export const EXT = { hatch: { x: 16.2, y: 0, z: -42 }, maxG: 0.08, tether: 110, jet: 0.9, vmax: 4.5 };
+export const EXT = { hatch: { x: 16.2, y: 0, z: -42 }, maxG: 0.08, tether: 40, jet: 0.9, vmax: 4.5 };
 export const AIRLOCK = { deck: 1, a: 110 };            // inner airlock door on the Cargo deck (starboard side)
 // Centrifuge: a spinning ring around the hub between Habitation and Engineering. Inside, "down" is outward.
 // R = floor radius (m), W = corridor width (along the ship axis), H = ceiling height. Spin gravity g = w^2 R.
