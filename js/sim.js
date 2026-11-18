@@ -1,5 +1,5 @@
 // Host-authoritative ship simulation. step(S, dt) advances everything by dt real seconds.
-import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKERS } from './config.js';
+import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKERS, EXT_DECK, EXT, AIRLOCK, ROOM_R } from './config.js';
 import { clamp, rand, randn, chance, pick, polar, compPos, log, fx } from './util.js';
 import { updateCombat, updateWeapons } from './combat.js';
 import { storyStep, updateVote, updateEffects } from './story.js';
@@ -353,9 +353,11 @@ function updateLife(S, dt, dtg) {
   L.food = Math.max(0, L.food); L.water = Math.max(0, L.water);
 
   const hf = heatFrac(S);
-  const counts = [0, 0, 0, 0, 0];
+  const counts = [0, 0, 0, 0, 0, 0];
   for (const p of alivePlayers(S)) counts[p.deck]++;
+  const stormRad = S.effects.stormT > 0 ? 30 * Math.min(1, S.effects.stormT / 10, (S.effects.stormLen - S.effects.stormT + 5) / 10) : 0;
   for (const d of S.decks) {
+    if (d.ext) { d.o2 = 0; d.n2 = 0; d.co2 = 0; d.temp = -100; d.rad = 0.00008 + stormRad * 1.6; continue; }
     const k = S.breaches.filter((b) => b.deck === d.id).reduce((s, b) => s + b.size * 0.012, 0) + (d.vent ? 0.08 : 0);
     if (k > 0) { const f = Math.exp(-k * dt); d.o2 *= f; d.n2 *= f; d.co2 *= f; }
     d.o2 -= 0.0015 * counts[d.id] * dt;
@@ -378,7 +380,7 @@ function updateLife(S, dt, dtg) {
     d.temp += (tgt - d.temp) * Math.min(1, (P < 5 ? 0.005 : 0.02) * dt);
     // radiation (mSv/s)
     let rad = 0.00004;
-    if (S.effects.stormT > 0) rad += 30 * Math.min(1, S.effects.stormT / 10, (S.effects.stormLen - S.effects.stormT + 5) / 10);
+    rad += stormRad;
     if (d.id === 0) rad *= 1 - 0.6 * S.mass.rmass / SHIP.rmassMax;
     if (d.id === 4) rad *= 1.2;
     if (d.id === 2) rad += (S.effects.leakT > 0 ? 1.5 : 0) + (S.effects.reactorRadT > 0 ? 18 : 0);
@@ -426,6 +428,14 @@ function updatePlayers(S, dt) {
       p.dose += (rad * dt) / 1000;
       if (p.dose > 5) { dmg += (p.dose - 5) * 0.6; cause = 'radiation sickness'; }
       if (S.drive.g > 2.2 && !p.seat) { dmg += (S.drive.g - 2.2) * 3; cause = 'high-g trauma'; }
+      if (p.deck === EXT_DECK && S.drive.g > EXT.maxG) {
+        // mag boots can't hold under thrust: the safety tether reels the crew member back into the airlock
+        const ap = airlockInside();
+        Object.assign(p, { deck: AIRLOCK.deck, x: ap.x, z: ap.z, tp: p.tp + 1, seat: null });
+        p.hp -= 25;
+        log(S, `${p.name} was torn off the hull by thrust and reeled in on the safety tether!`, 'bad');
+        fx(S, 'hit', { deck: AIRLOCK.deck, power: 0.4 });
+      }
       if (L.food <= 0) { dmg += 0.15; cause = 'starvation'; }
       if (L.water <= 0) { dmg += 0.25; cause = 'dehydration'; }
       if (p.god) dmg = 0;
@@ -464,6 +474,8 @@ function updatePlayers(S, dt) {
     if (S.cryoOffT > 90) { S.cryoOffT = 0; S.pods--; log(S, 'Cryo bay unpowered — a backup crew member has died in their pod!', 'bad'); }
   } else S.cryoOffT = 0;
 }
+
+export function airlockInside() { return polar(AIRLOCK.a, ROOM_R - 1.6); }
 
 // ---------- fabricator, drones, magazine ----------
 function updateWorkshops(S, dt) {

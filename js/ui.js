@@ -1,5 +1,5 @@
 // DOM UI: widget builder for console panels, HUD, toasts, crew votes.
-import { COMPS, DECKS, WAYPOINTS, SHIP, ITEMS } from './config.js';
+import { COMPS, DECKS, WAYPOINTS, SHIP, ITEMS, EXT, EXT_DECK, deckName } from './config.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp } from './util.js';
 import { eff, heatFrac, deltaV, inShelter } from './sim.js';
 
@@ -192,8 +192,9 @@ export class HUD {
       ${me.suit ? `<div class="sl"><span>SUIT O₂</span>${bar(me.suitO2 / 300, cls(me.suitO2, 90, 30), Math.ceil(me.suitO2) + ' s')}</div>` : ''}
       <div class="sl"><span>DOSE</span><b class="${cls(me.dose, 1, 3, true)}">${me.dose.toFixed(2)} Sv${shelter ? ' · SHELTERED' : ''}</b></div>
       <div class="sl"><span>HANDS</span><b>${me.item ? ITEMS[me.item.type].name + (me.item.type === 'ext' || me.item.type === 'spares' ? ` (${Math.max(0, Math.round(me.item.charge))}%)` : '') : '—'}</b></div>
-      <div class="sl"><span>${DECKS[me.deck].name.toUpperCase()}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>
-      <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 ? 'bad' : ''}">${S.drive.g.toFixed(2)} g${S.drive.g < 0.05 ? ' · MAG BOOTS' : ''}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}</b></div>`;
+      ${me.deck === EXT_DECK ? `<div class="sl"><span>EVA</span><b class="${me.suit ? 'warn' : 'bad'}">HARD VACUUM${me.suit ? '' : ' — NO SUIT!'}${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`
+        : `<div class="sl"><span>${DECKS[me.deck].name.toUpperCase()}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`}
+      <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.75) ? 'bad' : ''}">${S.drive.g.toFixed(2)} g${S.drive.g < 0.05 || me.deck === EXT_DECK ? ' · MAG BOOTS' : ''}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK ? ` · tether yanks above ${EXT.maxG} g` : ''}</b></div>`;
     // prompt
     this.prompt.innerHTML = focus ? promptFor(S, me, focus, ctx.touch) : '';
     // vignette
@@ -227,13 +228,16 @@ function promptFor(S, me, f, touch) {
   if (f.kind === 'comp') {
     const c = S.comps[f.id];
     parts.push(`<b>${f.label}</b> <span class="${cls(c.hp, 60, 25)}">${Math.round(c.hp)}%</span>${c.fire > 0 ? ' <span class="bad">ON FIRE</span>' : ''}${c.fault ? ' <span class="bad">FAULT</span>' : ''}`);
-    parts.push(K('E', 'Use console'));
+    parts.push(K('E', COMPS[f.id].ext ? 'Inspect' : 'Use console'));
     if (c.hp < 100 && c.fire <= 0.05) parts.push(K('R', it && it.type === 'spares' ? 'Repair (spare kit)' : c.hp <= 0 ? 'needs Spare Parts Kit' : 'Maintain (hold)'));
     if (c.fire > 0 && it && it.type === 'ext') parts.push(K('F', 'Extinguish (hold)'));
     if (c.fire > 0 && (!it || it.type !== 'ext')) parts.push('<span class="warn">Get an extinguisher (emergency locker)</span>');
     if (f.id === 'scrubbers' && it && it.type === 'cartridge') parts.push(K('F', 'Swap cartridge'));
   } else if (f.kind === 'locker') parts.push(`<b>Emergency Locker</b>`, K('E', 'Open'));
   else if (f.kind === 'lift') parts.push(`<b>${f.label}</b>`, K('E', 'Call lift'));
+  else if (f.kind === 'airlock') parts.push(`<b>Airlock</b>`, K('E', me.suit ? 'Cycle out for EVA' : 'Open (suit required for EVA)'));
+  else if (f.kind === 'hatch') parts.push(`<b>Airlock hatch</b>`, K('E', 'Cycle in / refill suit'));
+  else if (f.kind === 'hull') parts.push(`<b>Hull plating</b> ${Math.round(S.hull)}%`, K('F', 'Weld plating (hold, uses the patch)'));
   else if (f.kind === 'item') parts.push(K('E', 'Pick up ' + f.label));
   else if (f.kind === 'breach') parts.push(`<b class="bad">Hull breach</b>`, it && it.type === 'patch' ? K('F', 'Patch (hold)') : '<span class="warn">Needs a Hull Patch (locker/stores)</span>');
   else if (f.kind === 'player') {

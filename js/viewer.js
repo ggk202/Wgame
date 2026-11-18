@@ -1,7 +1,7 @@
 // WOLFRAM model viewer: browse the ship's 3D models (uses the game's own builders).
 import * as THREE from 'three';
 import { COMPS, COMP_IDS, DECKS, ROOM_H } from './config.js';
-import { World, buildComp, buildFire, buildAvatar, textSprite } from './world.js';
+import { World, buildComp, buildFire, buildAvatar, buildExterior, textSprite } from './world.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#vc');
@@ -17,14 +17,15 @@ const grid = new THREE.GridHelper(40, 40, 0x2a4058, 0x16222e); scene.add(grid);
 
 // ---------- catalogue ----------
 const CATS = [];
-const accentOf = (id) => DECKS[COMPS[id].deck].color;
+const accentOf = (id) => (COMPS[id].ext ? 0xd0a040 : DECKS[COMPS[id].deck].color);
 CATS.push({ title: 'Ship systems', items: COMP_IDS.filter((id) => !COMPS[id].ext).map((id) => ({ id, name: COMPS[id].name, sub: `Deck ${COMPS[id].deck} · ${DECKS[COMPS[id].deck].name}`, kind: 'comp' })) });
+CATS.push({ title: 'Exterior hardware (EVA)', items: COMP_IDS.filter((id) => COMPS[id].ext).map((id) => ({ id, name: COMPS[id].name, sub: 'Dorsal equipment spine', kind: 'comp' })) });
 CATS.push({ title: 'Crew & fixtures', items: [
   { id: 'crew', name: 'Crew member', sub: 'Shipboard clothes', kind: 'avatar' },
   { id: 'crew-suit', name: 'Crew member (vacuum suit)', sub: 'Helmet + life-support pack', kind: 'avatar', suit: true },
   { id: 'fire', name: 'Fire effect', sub: 'Shown on burning components', kind: 'fire' },
 ] });
-CATS.push({ title: 'Whole decks', items: DECKS.slice().reverse().map((d) => ({ id: 'deck' + d.id, name: d.full.split('— ')[1], sub: `Deck ${d.id}`, kind: 'deck', deck: d.id })) });
+CATS.push({ title: 'Whole decks', items: [{ id: 'exterior', name: 'EXTERIOR', sub: 'Hull, spine & drive (EVA area)', kind: 'exterior' }, ...DECKS.slice().reverse().map((d) => ({ id: 'deck' + d.id, name: d.full.split('— ')[1], sub: `Deck ${d.id}`, kind: 'deck', deck: d.id }))] });
 
 const list = $('#list');
 for (const c of CATS) {
@@ -58,9 +59,9 @@ function show(it) {
   if (it.kind === 'comp') {
     built = buildComp(COMPS[it.id].mesh, accentOf(it.id));
     root.add(built.group);
-    fireFx = buildFire(); fireFx.position.z = COMPS[it.id].fp * 0.25; root.add(fireFx);
+    if (!COMPS[it.id].ext) { fireFx = buildFire(); fireFx.position.z = COMPS[it.id].fp * 0.25; root.add(fireFx); }
     const c = COMPS[it.id];
-    info = `<h2>${c.name}</h2><dl><dt>Location</dt><dd>${it.sub}</dd><dt>Console</dt><dd>${c.panel || '—'}</dd><dt>Base power</dt><dd>${c.power} MW · priority ${c.prio}</dd><dt>Wear</dt><dd>${c.wear} %/min</dd><dt>Footprint</dt><dd>${(c.fp * 2).toFixed(1)} m</dd>${c.computer ? '<dt>Type</dt><dd>Computer: can suffer software faults</dd>' : ''}</dl>`;
+    info = `<h2>${c.name}</h2><dl><dt>Location</dt><dd>${it.sub}</dd><dt>Console</dt><dd>${c.panel || (c.ext ? 'none: inspect on EVA, repair by hand or drone' : '—')}</dd><dt>Base power</dt><dd>${c.power} MW · priority ${c.prio}</dd><dt>Wear</dt><dd>${c.wear} %/min</dd><dt>Footprint</dt><dd>${(c.fp * 2).toFixed(1)} m</dd>${c.computer ? '<dt>Type</dt><dd>Computer: can suffer software faults</dd>' : ''}</dl>`;
   } else if (it.kind === 'avatar') {
     const a = buildAvatar('#ff8c42');
     a.helmet.visible = !!it.suit; a.pack.visible = !!it.suit; a.item.visible = false;
@@ -69,6 +70,12 @@ function show(it) {
   } else if (it.kind === 'fire') {
     fireFx = buildFire(); fireFx.visible = true; root.add(fireFx);
     info = `<h2>Fire</h2><p>Grows with oxygen, spreads to nearby systems above 50% intensity, and is put out with an extinguisher, suppressant, or by venting the deck.</p>`;
+  } else if (it.kind === 'exterior') {
+    const comps = {};
+    root.add(buildExterior(comps));
+    root.children[0].userData.plume.visible = true;
+    built = { comps, exterior: true };
+    info = `<h2>Exterior</h2><p>The pressure hull with the dorsal equipment spine on top. Crew reach it through the Cargo-deck airlock in a vacuum suit. Radiator wings, three PDC turrets, the spinal railgun, the antenna and the sensor array are all repairable by hand.</p><p class="dim">The drive plume is shown lit here.</p>`;
   } else if (it.kind === 'deck') {
     const fake = { scene: root, decks: [], comps: {} };
     World.prototype.buildDeck.call(fake, DECKS[it.deck]);
@@ -82,12 +89,12 @@ function show(it) {
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
   orbit.target.copy(ctr);
-  orbit.dist = Math.max(2.2, Math.max(size.x, size.y, size.z) * (it.kind === 'deck' ? 1.25 : 1.9));
-  orbit.pitch = it.kind === 'deck' ? 0.85 : 0.35;
-  grid.visible = it.kind !== 'deck';
+  if (it.kind === 'exterior') { orbit.target.set(0, -8, 0); orbit.dist = 120; orbit.pitch = 0.5; }
+  else { orbit.dist = Math.max(2.2, Math.max(size.x, size.y, size.z) * (it.kind === 'deck' ? 1.25 : 1.9)); orbit.pitch = it.kind === 'deck' ? 0.85 : 0.35; }
+  grid.visible = it.kind !== 'deck' && it.kind !== 'exterior';
   $('#info').innerHTML = info;
-  $('#ctl-cond').style.display = it.kind === 'comp' || it.kind === 'deck' ? '' : 'none';
-  $('#t-fire').style.display = it.kind === 'comp' ? '' : 'none';
+  $('#ctl-cond').style.display = it.kind === 'comp' || it.kind === 'deck' || it.kind === 'exterior' ? '' : 'none';
+  $('#t-fire').style.display = it.kind === 'comp' && !COMPS[it.id].ext ? '' : 'none';
   $('#t-ceil').style.display = it.kind === 'deck' ? '' : 'none';
   applyOpts();
 }
@@ -113,11 +120,11 @@ canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId); if (!p) return;
   if (pointers.size === 1) { orbit.yaw -= (e.clientX - p.x) * 0.008; orbit.pitch = Math.max(-0.2, Math.min(1.5, orbit.pitch + (e.clientY - p.y) * 0.006)); opt.spin = false; $('#t-spin').classList.remove('sel'); }
   p.x = e.clientX; p.y = e.clientY;
-  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orbit.dist = Math.max(1, Math.min(60, (dist0 * pinch0) / d)); }
+  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orbit.dist = Math.max(1, Math.min(200, (dist0 * pinch0) / d)); }
 });
 const up = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch0 = 0; };
 canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(1, Math.min(60, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(1, Math.min(200, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
 
 function resize() {
   const r = canvas.getBoundingClientRect();

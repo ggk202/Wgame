@@ -18,6 +18,7 @@ export function createState(opts = {}) {
     comps[id] = { id, hp: 100, fire: 0, on: true, pw: 1, prio: c.prio, fault: 0, reboot: 0 };
   }
   const decks = DECKS.map((d) => ({ id: d.id, o2: 21, n2: 79, co2: 0.1, temp: 21, rad: 0, vent: false, isolate: false, force: false }));
+  decks.push(extDeck());
 
   return {
     v: VERSION,
@@ -60,6 +61,8 @@ export function createState(opts = {}) {
     stats: { kills: 0, podsUsed: 0, hits: 0, events: 0, startedAt: Date.now() },
   };
 }
+
+export function extDeck() { return { id: 5, ext: true, o2: 0, n2: 0, co2: 0, temp: -100, rad: 0, vent: false, isolate: true, force: false }; }
 
 export function newPlayer(id, name, color) {
   return {

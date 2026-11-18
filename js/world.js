@@ -1,7 +1,7 @@
 // Three.js scene: five stacked decks of the CSV Wolfram, components, players and effects.
 import * as THREE from 'three';
-import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WAYPOINTS } from './config.js';
-import { polar } from './util.js';
+import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WAYPOINTS, EXT, EXT_DECK, AIRLOCK } from './config.js';
+import { polar, compDeck } from './util.js';
 
 const SEG = 16;
 const mat = (color, o = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...o });
@@ -53,7 +53,7 @@ export function buildComp(kind, accent) {
   const g = new THREE.Group();
   const body = mat(0x5a6675), dark = mat(0x2b333d), acc = mat(accent);
   const screenMat = emis(0x2ad0c0, 0.9);
-  let screen = null, glow = null;
+  let screen = null, glow = null, wing = null, spin = null;
   const add = (geo, m, x = 0, y = 0, z = 0, rx = 0, ry = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, 0); g.add(o); return o; };
   switch (kind) {
     case 'console':
@@ -168,13 +168,114 @@ export function buildComp(kind, accent) {
       add(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 8), acc, 0.2, 2.2, -0.2).rotation.z = Math.PI / 2;
       screen = add(new THREE.PlaneGeometry(0.5, 0.3), screenMat, 0.2, 0.8, 0.95);
       break;
+    // ----- exterior hardware -----
+    case 'radiator': {
+      add(new THREE.BoxGeometry(1.0, 1.4, 4.0), body, 0, 0.7, 0);
+      add(new THREE.CylinderGeometry(0.35, 0.35, 4.2, 10), acc, 0, 1.2, 0, Math.PI / 2);
+      screen = add(new THREE.PlaneGeometry(0.6, 0.35), screenMat, 0, 0.9, 2.01);
+      wing = new THREE.Group(); wing.position.set(-0.5, 1.2, 0); g.add(wing);
+      const wm = new THREE.MeshLambertMaterial({ color: 0x2a2f36, emissive: 0x000000, flatShading: true });
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(20, 0.12, 14), wm); panel.position.x = -10; wing.add(panel);
+      for (let i = 1; i < 6; i++) { const r = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.2, 14), dark); r.position.x = -i * 3.4; wing.add(r); }
+      for (let j = -1; j <= 1; j++) { const r = new THREE.Mesh(new THREE.BoxGeometry(20, 0.18, 0.12), acc); r.position.set(-10, 0, j * 6.9); wing.add(r); }
+      wing.userData.mat = wm;
+      break;
+    }
+    case 'pdc': {
+      add(new THREE.CylinderGeometry(0.9, 1.1, 0.6, 12), dark, 0, 0.3, 0);
+      spin = new THREE.Group(); spin.position.y = 0.6; g.add(spin);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.2), body); head.position.y = 0.4; spin.add(head);
+      for (const x of [-0.25, 0.25]) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.8, 6), dark); b.rotation.x = -(Math.PI / 2 - 0.5); b.position.set(x, 0.9, -0.8); spin.add(b); }
+      screen = add(new THREE.PlaneGeometry(0.4, 0.25), screenMat, 0, 0.35, 1.0);
+      break;
+    }
+    case 'railgun': {
+      add(new THREE.BoxGeometry(2.4, 1.8, 3.4), body, 0, 0.9, 0);
+      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(0.4, 2.4, 0.6), dark, 0, 1.2, -4 - i * 6.5);
+      add(new THREE.BoxGeometry(0.9, 0.9, 27), body, 0, 2.6, -13.5);
+      add(new THREE.BoxGeometry(1.3, 0.25, 27), acc, 0, 3.1, -13.5);
+      add(new THREE.BoxGeometry(1.3, 0.25, 27), acc, 0, 2.1, -13.5);
+      glow = add(new THREE.BoxGeometry(1.0, 1.0, 1.0), emis(0x66aaff, 1), 0, 2.6, 0.6);
+      screen = add(new THREE.PlaneGeometry(0.8, 0.45), screenMat, 0, 1.0, 1.71);
+      break;
+    }
+    case 'antenna': {
+      add(new THREE.CylinderGeometry(0.15, 0.25, 3.2, 8), body, 0, 1.6, 0);
+      spin = new THREE.Group(); spin.position.y = 3.3; g.add(spin);
+      const dish = new THREE.Mesh(new THREE.SphereGeometry(1.6, 16, 8, 0, Math.PI * 2, 0, 0.9), new THREE.MeshLambertMaterial({ color: 0xd8dde4, side: THREE.DoubleSide, flatShading: true }));
+      dish.rotation.x = Math.PI * 0.75; spin.add(dish);
+      const feed = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 6), dark); feed.rotation.x = -Math.PI / 4; feed.position.set(0, 0.4, 0.4); spin.add(feed);
+      screen = add(new THREE.PlaneGeometry(0.4, 0.25), screenMat, 0, 0.8, 0.26);
+      break;
+    }
+    case 'sensorarray': {
+      add(new THREE.CylinderGeometry(0.2, 0.3, 3.6, 8), body, 0, 1.8, 0);
+      add(new THREE.BoxGeometry(1.4, 0.8, 0.8), dark, 0, 2.2, 0);
+      add(new THREE.SphereGeometry(0.45, 10, 8), mat(0xe8e8f0), 0.9, 2.9, 0);
+      spin = new THREE.Group(); spin.position.y = 3.8; g.add(spin);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.5, 0.15), acc); spin.add(bar);
+      screen = add(new THREE.PlaneGeometry(0.4, 0.25), screenMat, 0, 1.0, 0.31);
+      break;
+    }
     default:
       add(new THREE.BoxGeometry(1, 1, 1), body, 0, 0.5, 0);
   }
   const bb = new THREE.Box3().setFromObject(g);
   const light = add(new THREE.SphereGeometry(0.07, 8, 6), emis(0x40ff80), 0, 0, 0);
   light.position.set(bb.max.x - 0.15, bb.max.y + 0.08, bb.min.z + 0.15);
-  return { group: g, screen, glow, light, height: bb.max.y };
+  if (wing) light.position.set(0.3, 1.6, 1.8);
+  return { group: g, screen, glow, light, wing, spin, height: kind === 'radiator' ? 1.6 : bb.max.y };
+}
+
+// The dorsal equipment spine and the hull around it (EVA area). Fills `compsOut` with built exterior components.
+export function buildExterior(compsOut) {
+  const g = new THREE.Group();
+  const L = EXT.zMax - EXT.zMin + 4, zc = (EXT.zMax + EXT.zMin) / 2;
+  const plateTex = gridTexture('#4b535d', '#363d46'); plateTex.repeat.set(3, 14);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(EXT.w * 2 + 1.4, 0.4, L), new THREE.MeshLambertMaterial({ map: plateTex }));
+  plate.position.set(0, -0.2, zc); g.add(plate);
+  for (const x of [-EXT.w - 0.6, EXT.w + 0.6]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, L), mat(0xe0b020)); rail.position.set(x, 0.9, zc); g.add(rail);
+    for (let z = EXT.zMin; z <= EXT.zMax; z += 4) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 0.1), mat(0x707880)); post.position.set(x, 0.45, z); g.add(post); }
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, L), emis(0x806010, 0.6)); stripe.position.set(x * 0.95, 0.01, zc); g.add(stripe);
+  }
+  // main pressure hull below the spine
+  const hullMat = mat(0x5a6470);
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(13, 13, 82, 32, 1, true), hullMat);
+  hull.rotation.x = Math.PI / 2; hull.position.set(0, -13.6, -2); g.add(hull);
+  for (let i = 0; i < 7; i++) { const band = new THREE.Mesh(new THREE.TorusGeometry(13.05, 0.25, 6, 40), mat(0x3c444e)); band.position.set(0, -13.6, -38 + i * 12); g.add(band); }
+  const bow = new THREE.Mesh(new THREE.SphereGeometry(13, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), hullMat);
+  bow.rotation.x = -Math.PI / 2; bow.position.set(0, -13.6, -43); bow.scale.set(1, 0.55, 1); g.add(bow);
+  const windows = new THREE.Mesh(new THREE.TorusGeometry(10.5, 0.5, 6, 32, Math.PI * 0.9), emis(0xffe0a0, 0.8));
+  windows.position.set(0, -13.6, -47.5); windows.rotation.z = Math.PI * 0.05; g.add(windows);
+  // drive section and nozzle
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(13, 9, 10, 32), mat(0x4a525c)); skirt.rotation.x = -Math.PI / 2; skirt.position.set(0, -13.6, 44); g.add(skirt);
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(5, 11, 14, 24, 1, true), new THREE.MeshLambertMaterial({ color: 0x3a3a40, side: THREE.DoubleSide })); nozzle.rotation.x = -Math.PI / 2; nozzle.position.set(0, -13.6, 56); g.add(nozzle);
+  const plume = new THREE.Mesh(new THREE.ConeGeometry(10, 120, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xc8a8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  plume.rotation.x = -Math.PI / 2; plume.position.set(0, -13.6, 123); plume.visible = false; g.add(plume);
+  g.userData.plume = plume;
+  // airlock hatch
+  const hatch = new THREE.Group(); hatch.position.set(EXT.hatch.x, 0, EXT.hatch.z);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.15, 8, 20), mat(0xe0b020)); ring.rotation.x = Math.PI / 2; ring.position.y = 0.15; hatch.add(ring);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.15, 20), mat(0x707a86)); lid.position.y = 0.1; hatch.add(lid);
+  const hl = textSprite('AIRLOCK → CARGO DECK', { width: 1.6, size: 28, color: '#ffe0a0' }); hl.position.y = 1.6; hatch.add(hl);
+  g.add(hatch);
+  const sl = textSprite('DORSAL EQUIPMENT SPINE — keep thrust below 0.6 g during EVA', { width: 4.2, size: 26, color: '#ffd080' }); sl.position.set(0, 2.6, EXT.hatch.z + 3); g.add(sl);
+  // floodlights
+  for (const z of [-30, -10, 10, 30]) for (const x of [-EXT.w - 0.6, EXT.w + 0.6]) { const fl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.5), emis(0xfff4d0, 1)); fl.position.set(x, 1.1, z); g.add(fl); }
+  // components
+  for (const id of COMP_IDS) {
+    const c = COMPS[id];
+    if (!c.ext) continue;
+    const built = buildComp(c.mesh, 0xd0a040);
+    built.group.position.set(c.ex, 0, c.ez);
+    if (id === 'radB') built.group.rotation.y = Math.PI;
+    g.add(built.group);
+    const label = textSprite(c.name, { width: Math.min(1.9, 0.065 * c.name.length + 0.3), size: 30 });
+    label.position.set(c.ex, built.height + 0.8, c.ez); g.add(label);
+    compsOut[id] = { ...built, label };
+  }
+  return g;
 }
 
 export function buildFire() {
@@ -223,6 +324,9 @@ export class World {
     this.scene.add(this.point);
     this.point2 = new THREE.PointLight(0xffffff, 15, 18, 1.6);
     this.scene.add(this.point2);
+    this.sunlight = new THREE.DirectionalLight(0xfff4e0, 0);
+    this.sunlight.position.set(-60, 40, 30);
+    this.scene.add(this.sunlight);
     this.decks = [];
     this.comps = {};
     this.avatars = {};
@@ -232,6 +336,10 @@ export class World {
     this.flash = 0;
     this.buildStars();
     for (const d of DECKS) this.buildDeck(d);
+    this.exterior = buildExterior(this.comps);
+    this.exterior.position.y = EXT_DECK * DECK_H;
+    this.scene.add(this.exterior);
+    this.decks.push(this.exterior);
     this.buildHandItem();
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -355,7 +463,7 @@ export class World {
       const ap = polar(200, ROOM_R - 0.3);
       const al = new THREE.Mesh(new THREE.BoxGeometry(2.0, 2.6, 0.3), mat(0x707a86)); al.position.set(ap.x, 1.3, ap.z); al.rotation.y = -(200 * Math.PI) / 180; g.add(al);
       const alw = new THREE.Mesh(new THREE.CircleGeometry(0.35, 12), emis(0x80a0c0, 0.4)); alw.position.set(ap.x * 0.97, 1.7, ap.z * 0.97); alw.rotation.y = Math.PI - (200 * Math.PI) / 180; g.add(alw);
-      const at = textSprite('AIRLOCK', { width: 0.9, size: 28 }); at.position.set(ap.x * 0.95, 2.9, ap.z * 0.95); g.add(at);
+      const at = textSprite('AIRLOCK → EVA', { width: 1.2, size: 28 }); at.position.set(ap.x * 0.95, 2.9, ap.z * 0.95); g.add(at);
     }
 
     // components
@@ -380,8 +488,8 @@ export class World {
     this.decks.push(g);
   }
   buildHandItem() {
-    this.hand = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    this.hand.position.set(0.3, -0.26, -0.55);
+    this.hand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    this.hand.position.set(0.24, -0.22, -0.6);
     this.hand.rotation.set(0.2, -0.3, 0);
     this.hand.visible = false;
     this.camera.add(this.hand);
@@ -412,9 +520,12 @@ export class World {
     const pulse = 0.5 + 0.5 * Math.sin(now * 4);
     const powerDim = S.power && S.power.gen <= 0 && S.battery.charge <= 0.01 ? 0.35 : 1;
     const lc = red ? new THREE.Color(1, 0.35 + 0.3 * (1 - pulse), 0.3 + 0.3 * (1 - pulse)) : yel ? new THREE.Color(1, 0.9, 0.7) : new THREE.Color(1, 1, 1);
-    this.point.color.copy(lc); this.point.intensity = 40 * powerDim;
-    this.point2.color.copy(lc); this.point2.intensity = 15 * powerDim;
-    this.hemi.intensity = 0.9 * powerDim;
+    const eva = deck === EXT_DECK;
+    this.point.color.copy(lc); this.point.intensity = eva ? 0 : 40 * powerDim;
+    this.point2.color.copy(lc); this.point2.intensity = eva ? 0 : 15 * powerDim;
+    this.hemi.intensity = eva ? 0.45 : 0.9 * powerDim;
+    this.sunlight.intensity = eva ? 2.4 : 0;
+    if (eva) this.updateExterior(S, now, dt);
     const dg = this.decks[deck];
     dg.traverse((o) => { if (o.userData.lamp) o.material.color.setRGB(lc.r * 0.9 * powerDim, lc.g * 0.9 * powerDim, lc.b * 0.9 * powerDim); });
     // space view (only visible through bridge windows / hab port)
@@ -435,7 +546,7 @@ export class World {
     for (const id in this.comps) {
       const v = this.comps[id], c = S.comps[id];
       if (!c) continue;
-      const onDeck = COMPS[id].deck === deck;
+      const onDeck = compDeck(id) === deck;
       if (!onDeck) continue;
       const lp = v.label.position;
       v.label.visible = Math.hypot(lp.x - me.x, lp.z - me.z) > 3.2;
@@ -446,6 +557,7 @@ export class World {
         const off = hp <= 0 || c.pw <= 0 || !c.on;
         v.screen.material.color.setHex(off ? 0x050608 : c.fault ? (Math.sin(now * 6) > 0 ? 0x803080 : 0x200820) : hp < 25 ? 0x902020 : 0x2ad0c0);
       }
+      if (!v.fire) continue;
       v.fire.visible = c.fire > 0.02;
       if (v.fire.visible) {
         const s = 0.5 + c.fire * 1.3;
@@ -484,6 +596,24 @@ export class World {
     // hand item
     if (me.item) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
     else this.hand.visible = false;
+  }
+  updateExterior(S, now, dt) {
+    const hf = Math.min(1, S.heat.stored / 30000);
+    for (const id of ['radA', 'radB']) {
+      const w = this.comps[id].wing;
+      const target = S.heat.radExt && S.comps[id].hp > 0 ? 1 : 0.1;
+      w.scale.x += (target - w.scale.x) * Math.min(1, dt * 0.8);
+      w.userData.mat.emissive.setRGB(0.45 * hf * hf, 0.12 * hf * hf, 0.02 * hf);
+    }
+    const combat = !!S.enc;
+    for (const id of ['pdc1', 'pdc2', 'pdc3']) { const s = this.comps[id].spin; if (s && S.comps[id].hp > 0) s.rotation.y = combat ? Math.sin(now * 1.7 + id.length) * 1.4 : s.rotation.y * 0.98; }
+    if (this.comps.antenna.spin) this.comps.antenna.spin.rotation.y = Math.sin(now * 0.05) * 0.4;
+    if (this.comps.sensorArray.spin && S.comps.sensorArray.hp > 0) this.comps.sensorArray.spin.rotation.y += dt * (S.sensors.pingT > 0 ? 8 : 1.2);
+    const rg = this.comps.railgun.glow; const ch = S.weap.rail;
+    rg.material.color.setRGB(0.1 + 0.4 * ch, 0.2 + 0.6 * ch, 0.4 + 0.6 * ch);
+    const pl = this.exterior.userData.plume;
+    pl.visible = S.drive.ignited && S.drive.throttle > 0.01;
+    if (pl.visible) { pl.scale.set(0.6 + S.drive.throttle, 0.4 + S.drive.throttle * 1.2, 0.6 + S.drive.throttle); pl.material.opacity = 0.35 + 0.15 * Math.sin(now * 30); }
   }
   updateBreaches(S, deck, now) {
     const seen = new Set();

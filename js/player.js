@@ -1,6 +1,6 @@
 // Local first-person controller, keyboard/mouse input and interaction targeting.
-import { COMPS, COMP_IDS, LOCKERS, LIFT_A, ROOM_R, SHAFT_R, ITEMS, DECKS } from './config.js';
-import { polar, compPos, clamp } from './util.js';
+import { COMPS, COMP_IDS, LOCKERS, LIFT_A, ROOM_R, SHAFT_R, ITEMS, DECKS, EXT_DECK, EXT, AIRLOCK } from './config.js';
+import { polar, compPos, compDeck, clamp } from './util.js';
 
 // Shared input state, written by keyboard/mouse and touch controls.
 export const input = {
@@ -61,7 +61,7 @@ export class Controller {
     let speed = input.sprint ? 5.2 : 3.2;
     if (me.suit) speed *= 0.85;
     if (g > 1.2) speed /= Math.sqrt(g);
-    if (g < 0.05) speed *= 0.75; // mag boots
+    if (g < 0.05 || this.deck === EXT_DECK) speed *= 0.75; // mag boots
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     let mx = fx * input.fwd + rx * input.right, mz = fz * input.fwd + rz * input.right;
@@ -80,10 +80,14 @@ export class Controller {
     };
     for (let it = 0; it < 2; it++) {
       for (const id of COMP_IDS) {
-        const c = COMPS[id];
-        if (c.ext || c.deck !== this.deck) continue;
+        if (compDeck(id) !== this.deck) continue;
         const p = compPos(id);
-        push(p.x, p.z, c.fp);
+        push(p.x, p.z, COMPS[id].fp);
+      }
+      if (this.deck === EXT_DECK) {
+        push(EXT.hatch.x, EXT.hatch.z, 0.8);
+        this.x = clamp(this.x, -EXT.w, EXT.w); this.z = clamp(this.z, EXT.zMin, EXT.zMax);
+        continue;
       }
       const lk = LOCKERS.find((l) => l.deck === this.deck);
       const lp = polar(lk.a, lk.r); push(lp.x, lp.z, 0.6);
@@ -115,10 +119,16 @@ export class Controller {
     for (const b of S.breaches) if (b.deck === this.deck) { const p = polar(b.a, ROOM_R - 0.4); consider({ kind: 'breach', id: b.id, label: 'Hull breach' }, p.x, p.z, 3.4, 0.6); }
     for (const id of COMP_IDS) {
       const c = COMPS[id];
-      if (c.ext || c.deck !== this.deck) continue;
+      if (compDeck(id) !== this.deck) continue;
       const p = compPos(id);
       consider({ kind: 'comp', id, label: c.name }, p.x, p.z, c.fp + 2.3, 0.6);
     }
+    if (this.deck === EXT_DECK) {
+      consider({ kind: 'hatch', id: 'hatch', label: 'Airlock hatch' }, EXT.hatch.x, EXT.hatch.z, 3.0);
+      if (!best && me.item && me.item.type === 'patch' && S.hull < 100) best = { kind: 'hull', id: 'hull', label: 'Hull plating', d: 1 };
+      return best;
+    }
+    if (this.deck === AIRLOCK.deck) { const ap = polar(AIRLOCK.a, ROOM_R - 0.4); consider({ kind: 'airlock', id: 'airlock', label: 'Airlock' }, ap.x, ap.z, 2.8); }
     const lk = LOCKERS.find((l) => l.deck === this.deck);
     const lp = polar(lk.a, lk.r); consider({ kind: 'locker', id: 'locker', label: 'Emergency Locker' }, lp.x, lp.z, 2.6);
     const lift = polar(LIFT_A, SHAFT_R + 0.2); consider({ kind: 'lift', id: 'lift', label: `Lift (${DECKS[this.deck].name} deck)` }, lift.x, lift.z, 2.6);

@@ -25,7 +25,7 @@ The *CSV Wolfram* is a 4,000-tonne fusion torch freighter hauling a reactor core
 | 1 Cargo | Fabricator, stores, repair drone bay (external systems), torpedo magazine |
 | 0 Drive | Fusion torch drive, drive control, reaction-mass tanks, pellet injector |
 
-Outside the hull are two radiator wings, three PDC turrets, a spinal railgun, a high-gain antenna and a sensor array. These are repaired by drones.
+**Exterior (EVA):** suit up at an emergency locker, then cycle out through the airlock on the Cargo deck. You walk the dorsal equipment spine on mag boots: two radiator wings (they glow as the heat sink fills), three PDC turrets, the spinal railgun, the high-gain antenna and the sensor array. Repair them by hand (`R`, with a spare kit if destroyed) or weld hull plating with a Hull Patch (`F`). Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at the hatch), and weapon hits on external systems hurt crew nearby. Above 0.6 g of thrust, the safety tether yanks you back into the airlock, injured. Repair drones remain the remote alternative.
 
 ## Hard sci-fi rules
 

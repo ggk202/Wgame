@@ -29,8 +29,10 @@ export function polar(aDeg, r) {
 }
 export function compPos(id) {
   const c = COMPS[id];
+  if (c.ext) return { x: c.ex, z: c.ez };
   return polar(c.a, c.r);
 }
+export const compDeck = (id) => (COMPS[id].ext ? 5 : COMPS[id].deck);
 
 export function log(S, text, kind = 'info') {
   S.log.push({ t: S.t, text, kind });

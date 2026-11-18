@@ -1,5 +1,5 @@
 // Console panel definitions. Each: { title, build(B, ctx, compId) }
-import { COMPS, COMP_IDS, DECKS, WAYPOINTS, SHIP, G0, RECIPES, STATION_PRICES, ITEMS, AU } from './config.js';
+import { COMPS, COMP_IDS, DECKS, WAYPOINTS, SHIP, G0, RECIPES, STATION_PRICES, ITEMS, AU, EXT, deckName } from './config.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp, pct } from './util.js';
 import { eff, maxG, deltaV, heatFrac, demandOf, PDCS } from './sim.js';
 import { ENEMY_TYPES } from './combat.js';
@@ -198,7 +198,7 @@ export const PANELS = {
       B.kv('Reserves', (S) => ({ text: `O₂ ${Math.round(S.life.o2)} kg · N₂ ${Math.round(S.life.n2)} kg · water ${Math.round(S.life.water)} L · food ${Math.round(S.life.food)} kg`, cls: S.life.o2 < 200 || S.life.n2 < 400 ? 'warn' : '' }));
       B.toggle('Electrolysis (water → O₂)', (S) => S.life.electrolysis, 'life.electrolysis', (v) => ({ on: v }));
       B.kv('Suppressant charges', (S) => S.life.suppressant);
-      B.html((S) => '<table class="tbl"><tr><th>Deck</th><th>kPa</th><th>O₂</th><th>CO₂</th><th>°C</th><th>Status</th><th></th></tr>' + S.decks.slice().reverse().map((d) => {
+      B.html((S) => '<table class="tbl"><tr><th>Deck</th><th>kPa</th><th>O₂</th><th>CO₂</th><th>°C</th><th>Status</th><th></th></tr>' + S.decks.filter((d) => !d.ext).reverse().map((d) => {
         const P = d.o2 + d.n2 + d.co2, br = S.breaches.filter((b) => b.deck === d.id).length;
         const fires = COMP_IDS.filter((id) => !COMPS[id].ext && COMPS[id].deck === d.id && S.comps[id].fire > 0).length;
         const st = [d.vent ? '<b class="bad">VENTING</b>' : '', br ? `<b class="bad">${br} breach</b>` : '', fires ? `<b class="bad">${fires} fire</b>` : '', d.force ? 'forced' : ''].filter(Boolean).join(' ');
@@ -213,7 +213,7 @@ export const PANELS = {
     build(B) {
       B.bar('Cartridge saturation', (S) => ({ v: S.life.sat, text: pct(S.life.sat), cls: cls(S.life.sat, 0.6, 0.85, true) }));
       B.kv('Scrubbing efficiency', (S) => ({ text: pct(S.scrubE || 0), cls: cls(S.scrubE || 0, 0.5, 0.2) }));
-      B.kv('CO₂ by deck (kPa)', (S) => S.decks.map((d) => `${DECKS[d.id].name[0]}:${d.co2.toFixed(2)}`).join('  '));
+      B.kv('CO₂ by deck (kPa)', (S) => S.decks.filter((d) => !d.ext).map((d) => `${DECKS[d.id].name[0]}:${d.co2.toFixed(2)}`).join('  '));
       B.buttons([{ label: 'Thermal bake-out', labelFn: (S) => (S.life.regen > 0 ? `Baking out… ${Math.ceil(S.life.regen)} s` : 'Thermal bake-out (60 s, offline)'), act: 'scrub.regen', enabled: (S) => S.life.regen <= 0 }]);
       B.note('Fastest fix: bring a Scrubber Cartridge from Stores (Cargo deck) and press F here. A bake-out regenerates cartridges to about 20%, but scrubbing stops while it runs and it wears the unit.');
     },
@@ -242,7 +242,7 @@ export const PANELS = {
       B.kv('Your radiation dose', (S) => { const p = ctx.me(); return { text: `${p.dose.toFixed(2)} Sv${p.dose > 1 ? ' — radiation sickness, max health reduced' : ''}`, cls: cls(p.dose, 1, 3, true) }; });
       B.note((S) => (eff(S, 'medbay') > 0 ? 'Stay here (panel open) to be treated: about +6 health per second.' : '<span class="bad">Medbay offline: no treatment possible.</span>'));
       B.buttons([{ label: 'Radiation countermeasures (−1.2 Sv, uses 1 medkit)', act: 'med.rad' }]);
-      B.html((S) => '<table class="tbl"><tr><th>Crew</th><th>Health</th><th>Dose</th><th>Deck</th></tr>' + Object.values(S.players).filter((p) => p.connected).map((p) => `<tr><td>${esc(p.name)}</td><td class="${cls(p.hp, 50, 25)}">${p.state === 'alive' ? Math.round(p.hp) : p.state.toUpperCase()}</td><td>${p.dose.toFixed(2)} Sv</td><td>${DECKS[p.deck].name}</td></tr>`).join('') + '</table>');
+      B.html((S) => '<table class="tbl"><tr><th>Crew</th><th>Health</th><th>Dose</th><th>Deck</th></tr>' + Object.values(S.players).filter((p) => p.connected).map((p) => `<tr><td>${esc(p.name)}</td><td class="${cls(p.hp, 50, 25)}">${p.state === 'alive' ? Math.round(p.hp) : p.state.toUpperCase()}</td><td>${p.dose.toFixed(2)} Sv</td><td>${deckName(p.deck)}</td></tr>`).join('') + '</table>');
     },
   },
   cryo: {
@@ -341,7 +341,7 @@ export const PANELS = {
         const job = S.drones.jobs.find((j) => j.target === id);
         return `<tr><td>${COMPS[id].name}</td><td>${bar(S.comps[id].hp / 100, cls(S.comps[id].hp, 60, 25), Math.round(S.comps[id].hp) + '%')}</td><td>${job ? `working ${Math.ceil(job.t)} s` : btn('Dispatch (1 spare kit)', 'drones.send', { target: id }, 'mini')}</td></tr>`;
       }).join('') + `<tr><td>Hull plating</td><td>${bar(S.hull / 100, cls(S.hull, 50, 25), Math.round(S.hull) + '%')}</td><td>${S.drones.jobs.find((j) => j.target === 'hull') ? 'working' : btn('Dispatch (1 hull patch)', 'drones.send', { target: 'hull' }, 'mini')}</td></tr></table>`);
-      B.note('External systems can only be repaired by drones. Each job takes about 35 s and uses stock from Stores.');
+      B.note('Drones repair external systems remotely: about 35 s per job, using stock from Stores. Crew can also repair them by hand on an EVA. Suit up, cycle out through the airlock on this deck, and keep the drive below 0.6 g. Hand-repair is faster than drones, and a Hull Patch can be welded onto the hull plating directly.');
     },
   },
   magazine: {
@@ -394,6 +394,38 @@ export const PANELS = {
       B.note('Suits give 5 minutes of oxygen and protect against vacuum, smoke and heat, but slow you down. Patches and medkits come from the ship-wide stores through the pneumatic tube network.');
     },
   },
+  extcomp: {
+    title: 'EXTERNAL SYSTEM',
+    build(B, ctx, id) {
+      const info = { radA: 'Radiator wing: dumps waste heat to space (50 MW extended, 8 MW retracted).', radB: 'Radiator wing: dumps waste heat to space (50 MW extended, 8 MW retracted).', railgun: 'Spinal railgun barrel and capacitor housing. Fired from Fire Control.', antenna: 'High-gain antenna for long-range comms and hailing.', sensorArray: 'Radar, lidar and IR array. Feeds target lock quality.' }[id] || 'Point-defence cannon: shreds incoming torpedoes and drones.';
+      B.note(`<b>${COMPS[id].name}</b>: ${info}`);
+      B.bar('Integrity', (S) => ({ v: S.comps[id].hp / 100, text: Math.round(S.comps[id].hp) + '%', cls: cls(S.comps[id].hp, 60, 25) }));
+      B.kv('Drone job', (S) => (S.drones.jobs.some((j) => j.target === id) ? 'a drone is working on it' : '—'));
+      B.note('Hold R here to repair it by hand. Destroyed units need a Spare Parts Kit in your hands.');
+    },
+  },
+  airlock: {
+    title: 'AIRLOCK',
+    build(B, ctx) {
+      B.kv('Your suit', () => { const p = ctx.me(); return p.suit ? { text: `ON · ${Math.ceil(p.suitO2)} s O₂`, cls: p.suitO2 > 120 ? 'good' : 'warn' } : { text: 'NOT WORN', cls: 'bad' }; });
+      B.kv('Drive thrust', (S) => ({ text: `${S.drive.g.toFixed(2)} g`, cls: S.drive.g > EXT.maxG ? 'bad' : 'good' }));
+      B.buttons([
+        { label: 'Refill suit O₂', act: 'locker.refill' },
+        { label: 'Cycle out to EVA', cls: 'green', onClick: () => ctx.local('local.eva', { out: true }), enabled: () => ctx.me().suit },
+      ]);
+      B.note('Outside is hard vacuum. You walk the dorsal equipment spine on mag boots, with radiators, PDC turrets, the railgun, antenna and sensor array. Hold R to repair them (spare kit needed if destroyed). Hold F with a Hull Patch to weld hull plating. If thrust goes above 0.6 g, your tether yanks you back in, and it hurts. You get no radiation shielding out there. Vacuum suits are in the emergency locker.');
+    },
+  },
+  hatch: {
+    title: 'AIRLOCK HATCH',
+    build(B, ctx) {
+      B.kv('Suit oxygen', () => { const p = ctx.me(); return { text: `${Math.ceil(p.suitO2)} s`, cls: p.suitO2 > 90 ? 'good' : 'bad' }; });
+      B.buttons([
+        { label: 'Refill suit O₂ (umbilical)', act: 'locker.refill' },
+        { label: 'Cycle in to Cargo deck', cls: 'green', onClick: () => ctx.local('local.eva', { out: false }) },
+      ]);
+    },
+  },
   lift: {
     title: 'LIFT',
     build(B, ctx) {
@@ -426,7 +458,7 @@ export function statusBlock(B) {
   B.html((S) => {
     let h = '<table class="tbl status"><tr><th>System</th><th>Integrity</th><th>State</th></tr>';
     for (const d of [4, 3, 2, 1, 0, -1]) {
-      h += `<tr class="grp"><td colspan="3">${d >= 0 ? DECKS[d].full : 'EXTERNAL (drone repair)'}</td></tr>`;
+      h += `<tr class="grp"><td colspan="3">${d >= 0 ? DECKS[d].full : 'EXTERIOR (EVA or drones)'}</td></tr>`;
       for (const id of COMP_IDS) {
         const c = COMPS[id];
         if ((d === -1 && !c.ext) || (d >= 0 && (c.ext || c.deck !== d))) continue;

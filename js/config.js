@@ -76,14 +76,16 @@ export const COMPS = {
   tanks:      { name: 'Reaction Mass Tanks', deck: 0, a: -75, r: 8.6, mesh: 'tanks', fp: 1.6, panel: 'tanks', power: 0.2, wear: 0.2, prio: 2 },
   injector:   { name: 'Pellet Injector', deck: 0, a: 140, r: 8.8, mesh: 'machine', fp: 1.1, panel: 'tanks', power: 0.4, wear: 0.5, prio: 1 },
   // External (repaired by drones)
-  radA:       { name: 'Radiator Wing A', ext: true, power: 0.3, wear: 0.25, prio: 1 },
-  radB:       { name: 'Radiator Wing B', ext: true, power: 0.3, wear: 0.25, prio: 1 },
-  pdc1:       { name: 'PDC Turret 1', ext: true, power: 0.5, wear: 0.15, prio: 1 },
-  pdc2:       { name: 'PDC Turret 2', ext: true, power: 0.5, wear: 0.15, prio: 1 },
-  pdc3:       { name: 'PDC Turret 3', ext: true, power: 0.5, wear: 0.15, prio: 1 },
-  railgun:    { name: 'Spinal Railgun', ext: true, power: 0.3, wear: 0.15, prio: 2 },
-  antenna:    { name: 'High-Gain Antenna', ext: true, power: 0.3, wear: 0.15, prio: 3 },
-  sensorArray:{ name: 'External Sensor Array', ext: true, power: 0.5, wear: 0.2, prio: 2 },
+  // External (hull exterior, reached by EVA through the Cargo airlock, or repaired by drones)
+  // ex/ez = position on the dorsal equipment spine (x across, z along the ship; -z toward the bow)
+  radA:       { name: 'Radiator Wing A', ext: true, ex: -6.4, ez: 4, fp: 0.8, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
+  radB:       { name: 'Radiator Wing B', ext: true, ex: 6.4, ez: 4, fp: 0.8, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
+  pdc1:       { name: 'PDC Turret 1', ext: true, ex: -4.4, ez: -22, fp: 1.0, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  pdc2:       { name: 'PDC Turret 2', ext: true, ex: 4.4, ez: -22, fp: 1.0, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  pdc3:       { name: 'PDC Turret 3', ext: true, ex: 0, ez: 27, fp: 1.0, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  railgun:    { name: 'Spinal Railgun', ext: true, ex: 0, ez: -11, fp: 1.4, mesh: 'railgun', power: 0.3, wear: 0.15, prio: 2 },
+  antenna:    { name: 'High-Gain Antenna', ext: true, ex: -4.4, ez: 18, fp: 1.0, mesh: 'antenna', power: 0.3, wear: 0.15, prio: 3 },
+  sensorArray:{ name: 'External Sensor Array', ext: true, ex: 4.4, ez: -31, fp: 1.0, mesh: 'sensorarray', power: 0.5, wear: 0.2, prio: 2 },
 };
 export const COMP_IDS = Object.keys(COMPS);
 
@@ -92,7 +94,12 @@ export const LOCKERS = [
   { deck: 0, a: -140, r: 9.6 }, { deck: 1, a: -120, r: 9.6 }, { deck: 2, a: 180, r: 9.6 },
   { deck: 3, a: 315, r: 9.6 }, { deck: 4, a: 140, r: 9.6 },
 ];
-export const LIFT_A = 180;           // lift door faces south
+export const LIFT_A = 180;
+// Exterior (EVA). Players outside have deck = EXT_DECK and walk the dorsal equipment spine with mag boots.
+export const EXT_DECK = 5;
+export const EXT = { w: 7.0, zMin: -37, zMax: 33, hatch: { x: 0, z: 10 }, maxG: 0.6 };
+export const AIRLOCK = { deck: 1, a: 200 };            // inner airlock door on the Cargo deck
+export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : (DECKS[d] ? DECKS[d].name : '?'));           // lift door faces south
 export const SHELTER = { deck: 3, a: 315, r: 6.4, rad: 2.2 }; // storm shelter zone (water-wall cubicle)
 
 export const ITEMS = {

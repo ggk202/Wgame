@@ -1,7 +1,7 @@
 // WOLFRAM — boot, lobby, game loop, networking glue.
-import { VERSION, DIFFICULTY, STORYTELLERS, LENGTHS, PLAYER_COLORS, COMPS, DECKS, LIFT_A, SHAFT_R, WAYPOINTS } from './config.js';
+import { VERSION, DIFFICULTY, STORYTELLERS, LENGTHS, PLAYER_COLORS, COMPS, DECKS, LIFT_A, SHAFT_R, WAYPOINTS, EXT, EXT_DECK, AIRLOCK, ROOM_R } from './config.js';
 import { polar, fmtTime, clamp } from './util.js';
-import { createState, newPlayer } from './state.js';
+import { createState, newPlayer, extDeck } from './state.js';
 import { step } from './sim.js';
 import { applyAction } from './actions.js';
 import { World } from './world.js';
@@ -75,6 +75,7 @@ function startHost(role, who, S) {
   G.role = role;
   G.S = S;
   S.debug = role === 'solo' || QS.get('debug') === '1';
+  if (S.decks.length < 6) S.decks.push(extDeck()); // older saves
   S.fx = [];
   for (const p of Object.values(S.players)) { p.connected = false; p.seat = null; }
   const existing = Object.values(S.players).find((p) => p.name === who.name);
@@ -112,7 +113,7 @@ function hostOnMsg(pid, m) {
   }
   const p = S.players[pid];
   if (!p) return;
-  if (m.t === 'pos') { if (p.state !== 'dead') { p.x = m.x; p.z = m.z; p.deck = clamp(m.d | 0, 0, 4); p.yaw = m.y; } }
+  if (m.t === 'pos') { if (p.state !== 'dead') { p.x = m.x; p.z = m.z; p.deck = clamp(m.d | 0, 0, 5); p.yaw = m.y; } }
   else if (m.t === 'act') applyAction(S, pid, m.a, m.args || {});
   else if (m.t === 'chat') { const msg = { t: 'chat', from: p.name, color: p.color, text: String(m.text).slice(0, 200) }; G.net.broadcast(msg); showChat(msg); }
 }
@@ -172,7 +173,7 @@ function enterGame() {
 function panelCtx() {
   return {
     S: () => G.S, me: () => meView(), act, click: () => G.sfx.play('click'), touch: G.touchMode,
-    local: (a, args) => { if (a === 'local.lift') rideLift(args.deck); },
+    local: (a, args) => { if (a === 'local.lift') rideLift(args.deck); if (a === 'local.eva') cycleAirlock(args.out); },
     closePanel: () => closePanel(),
   };
 }
@@ -219,6 +220,23 @@ function rideLift(deck) {
   }, 650);
 }
 
+function cycleAirlock(out) {
+  closePanel();
+  if (G.lifting) return;
+  const me = G.S.players[G.myId];
+  if (out && !me.suit) { G.hud.toast('Put on a vacuum suit first (emergency locker)', 'warn'); return; }
+  G.lifting = true;
+  G.sfx.play('hiss');
+  $('#fade').classList.add('on');
+  setTimeout(() => {
+    if (out) { G.ctl.deck = EXT_DECK; G.ctl.x = EXT.hatch.x + (Math.random() - 0.5) * 0.6; G.ctl.z = EXT.hatch.z - 1.6; G.ctl.yaw = 0; }
+    else { const p = polar(AIRLOCK.a, ROOM_R - 1.6); G.ctl.deck = AIRLOCK.deck; G.ctl.x = p.x; G.ctl.z = p.z; G.ctl.yaw = Math.atan2(p.x, p.z); }
+    G.ctl.pitch = 0;
+    pushMyPos(true);
+    act('eva', { out });
+    setTimeout(() => { $('#fade').classList.remove('on'); G.lifting = false; }, 400);
+  }, 1500);
+}
 function onKey(k, e) {
   if (G.chatOpen) return true;
   if (k === 'escape') { if (G.panel.open) closePanel(); else toggleMenu(); return true; }
@@ -249,9 +267,11 @@ function handleInteraction(dt) {
     input.use = false;
     if (G.panel.open && G.touchMode) closePanel();
     else if (f && !blocked) {
-      if (f.kind === 'comp') openPanel(COMPS[f.id].panel, f.id);
+      if (f.kind === 'comp') openPanel(COMPS[f.id].panel || 'extcomp', f.id);
       else if (f.kind === 'locker') openPanel('locker');
       else if (f.kind === 'lift') openPanel('lift');
+      else if (f.kind === 'airlock') openPanel('airlock');
+      else if (f.kind === 'hatch') openPanel('hatch');
       else if (f.kind === 'item') act('item.pickup', { id: f.id });
     }
   }
@@ -267,6 +287,7 @@ function handleInteraction(dt) {
     else if (input.item && it) {
       if (it.type === 'ext' && f.kind === 'comp') { act('work', { kind: 'ext', target: f.id }); G.sfx.play('hiss'); }
       else if (it.type === 'patch' && f.kind === 'breach') { act('work', { kind: 'patch', target: f.id }); G.sfx.play('repair'); }
+      else if (it.type === 'patch' && f.kind === 'hull') { act('work', { kind: 'hull', target: 'hull' }); G.sfx.play('repair'); }
       else if (it.type === 'medkit') { act('work', { kind: 'medkit', target: f.kind === 'player' ? f.id : null }); input.item = false; }
       else if (it.type === 'cartridge' && f.kind === 'comp' && f.id === 'scrubbers') { act('work', { kind: 'cartridge', target: 'scrubbers' }); input.item = false; }
       else if (it.type === 'spares' && f.kind === 'comp') { act('work', { kind: 'repair', target: f.id }); G.sfx.play('repair'); }
@@ -274,7 +295,7 @@ function handleInteraction(dt) {
   } else if (!blocked && !f && input.item && me.item && me.item.type === 'medkit' && G.workT <= 0) { G.workT = 0.5; act('work', { kind: 'medkit', target: null }); input.item = false; }
   if (G.touch) {
     G.touch.setLabels({
-      use: f ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : 'USE') : (G.panel.open ? 'CLOSE' : ''),
+      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : 'USE') : (G.panel.open ? 'CLOSE' : ''),
       repair: f && f.kind === 'comp' && S.comps[f.id].hp < 100 ? 'REPAIR' : '',
       item: me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : 'REPAIR') : '',
       drop: me.item ? 'DROP' : '',

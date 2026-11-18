@@ -1,6 +1,6 @@
 // Combat encounters: realistic-ish engagement at hundreds to thousands of km.
 import { COMPS, COMP_IDS, DECKS, ROOM_R } from './config.js';
-import { clamp, rand, randi, chance, pick, weightedPick, polar, log, fx, startVote } from './util.js';
+import { clamp, rand, randi, chance, pick, weightedPick, polar, compPos, log, fx, startVote } from './util.js';
 import { eff, igniteComp, compsOnDeck, PDCS } from './sim.js';
 
 export const ENEMY_TYPES = {
@@ -73,7 +73,14 @@ export function applyHit(S, dmg, o = {}) {
     S.comps[id].hp = clamp(S.comps[id].hp - dmg * rand(0.8, 1.4), 0, 100);
     S.hull = Math.max(0, S.hull - dmg * 0.06);
     log(S, `${label}: ${COMPS[id].name} hit (external)`, 'bad');
-    fx(S, 'hit', { deck: -1, power: 0.5 });
+    const cp = compPos(id);
+    for (const p of Object.values(S.players)) {
+      if (p.state !== 'alive' || p.deck !== 5) continue;
+      const dist = Math.hypot(p.x - cp.x, p.z - cp.z);
+      if (dist < 10) { p.hp -= dmg * 0.9 * (1 - dist / 10); log(S, `${p.name} was caught in the blast on the hull!`, 'bad'); }
+      else if (chance(0.15)) p.hp -= 10;
+    }
+    fx(S, 'hit', { deck: 5, power: 0.5 });
     return;
   }
   const dk = deck ?? randi(0, 4);

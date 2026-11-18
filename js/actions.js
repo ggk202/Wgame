@@ -1,6 +1,6 @@
 // All player-initiated state changes. Executed on the host only.
-import { COMPS, COMP_IDS, ITEMS, RECIPES, LOCKERS, STATION_PRICES, SHIP, DECKS, WAYPOINTS, ROOM_R } from './config.js';
-import { clamp, polar, compPos, log, fx, rand } from './util.js';
+import { COMPS, COMP_IDS, ITEMS, RECIPES, LOCKERS, STATION_PRICES, SHIP, DECKS, WAYPOINTS, ROOM_R, EXT_DECK, deckName } from './config.js';
+import { clamp, polar, compPos, compDeck, log, fx, rand } from './util.js';
 import { eff, startFlip, depart, scram, maxG, igniteComp } from './sim.js';
 import { fireRail, launchTorpedo, deployChaff, startEncounter, applyHit, addBreach } from './combat.js';
 import { castVote, pirateDemand, fireEvent } from './story.js';
@@ -10,7 +10,7 @@ const toast = (S, p, text) => fx(S, 'toast', { to: p.id, text });
 const dist2 = (p, x, z) => Math.hypot(p.x - x, p.z - z);
 function nearComp(p, id, extra = 2.2) {
   const c = COMPS[id];
-  if (!c || c.ext || c.deck !== p.deck) return false;
+  if (!c || compDeck(id) !== p.deck) return false;
   const cp = compPos(id);
   return dist2(p, cp.x, cp.z) < c.fp + extra;
 }
@@ -50,8 +50,10 @@ export function applyAction(S, pid, a, args = {}) {
       p.item = { type: it.type, charge: it.charge };
       S.items = S.items.filter((i) => i !== it); return;
     }
+    case 'eva': log(S, args.out ? `${p.name} cycled out through the airlock for EVA` : `${p.name} is back inside`, 'info'); return;
     case 'locker.suit': {
       const lk = LOCKERS.find((l) => l.deck === p.deck);
+      if (!lk) return;
       const lp = polar(lk.a, lk.r);
       if (dist2(p, lp.x, lp.z) > 3.5) return;
       p.suit = !p.suit; p.suitO2 = 300;
@@ -263,6 +265,13 @@ function doWork(S, p, { kind, target }) {
     else if (t.state === 'alive') t.hp = Math.min(t.maxHp || 100, t.hp + 45);
     else return;
     p.item = null; return;
+  }
+  if (kind === 'hull') {
+    if (!it || it.type !== 'patch' || p.deck !== EXT_DECK) return;
+    if (S.hull >= 100) return err('Hull plating is intact');
+    p.hullWork = (p.hullWork || 0) + 0.25 / 5;
+    if (p.hullWork >= 1) { p.hullWork = 0; S.hull = Math.min(100, S.hull + 7); p.item = null; log(S, `${p.name} welded new hull plating (+7%)`, 'good'); fx(S, 'chime'); }
+    return;
   }
   if (kind === 'cartridge') {
     if (!it || it.type !== 'cartridge' || !nearComp(p, 'scrubbers', 2.4)) return;
