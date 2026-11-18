@@ -35,7 +35,11 @@ export function startEncounter(S, kind, pts) {
     });
   };
   let name;
-  if (kind === 'drones') {
+  if (kind === 'drill') { // tutorial: an unarmed target hulk that just sits there
+    add('corvette', { range: 300, vr: 0, missiles: 0, slugs: 0, railT: 1e9, missileCd: 1e9, training: true, hp: 12, maxHp: 12, dRate: 0.003 });
+    enemies[0].name = 'Training target “Clay Pigeon”';
+    name = 'Live-fire drill';
+  } else if (kind === 'drones') {
     const n = clamp(Math.round(pts / 28), 2, 7);
     for (let i = 0; i < n; i++) add('drone', { range: rand(1800, 3000) });
     name = 'Rogue drone swarm';
@@ -162,11 +166,12 @@ export function updateCombat(S, dt) {
   for (const e of E.enemies) {
     if (e.dead || e.gone) continue;
     const T = ENEMY_TYPES[e.type];
-    if (!e.fleeing && !T.kamikaze && e.hp < e.maxHp * 0.3) { e.fleeing = true; log(S, `${e.name} is breaking off!`, 'good'); }
-    if (!e.fleeing && !T.kamikaze && ((e.missiles <= 0 && e.slugs <= 0) || E.t > 240)) { e.fleeing = true; log(S, `${e.name} is out of munitions and breaking off`, 'good'); }
+    if (!e.fleeing && !T.kamikaze && !e.training && e.hp < e.maxHp * 0.3) { e.fleeing = true; log(S, `${e.name} is breaking off!`, 'good'); }
+    if (!e.fleeing && !T.kamikaze && !e.training && ((e.missiles <= 0 && e.slugs <= 0) || E.t > 240)) { e.fleeing = true; log(S, `${e.name} is out of munitions and breaking off`, 'good'); }
     let desire = 0;
     if (T.kamikaze) desire = -1;
     else if (e.fleeing) desire = 3;
+    else if (e.training) desire = 0;
     else desire = e.range > T.pref * 1.15 ? -1 : e.range < T.pref * 0.85 ? 1 : 0;
     if (desire === 0) e.vr += clamp(-e.vr, -T.accel * dt, T.accel * dt);
     else e.vr += desire * T.accel * dt;

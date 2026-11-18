@@ -374,11 +374,13 @@ export class World {
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q), up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
     const p = mesh.geometry.parameters, sw = p.width * sc.x, sh = p.height * sc.y;
     const vw = window.innerWidth, vh = window.innerHeight;
-    const targetH = Math.min((vh - 150) * 0.95, (vw * 0.9) / (sw / sh));
+    const inset = this.focusInset ? this.focusInset() : 0; // px reserved on the left (tutorial box)
+    const targetH = Math.min((vh - 150) * 0.95, ((vw - inset) * 0.9) / (sw / sh));
     const tanH = Math.tan((this.camera.fov * Math.PI) / 360);
     const d = (sh * vh) / (2 * tanH * targetH);
     const shift = (34 / vh) * 2 * d * tanH; // lift the screen up a little to leave room for the exit button
-    const target = pos.clone().addScaledVector(up, -shift);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const target = pos.clone().addScaledVector(up, -shift).addScaledVector(right, -((inset / 2) / vh) * 2 * d * tanH);
     const eye = target.clone().addScaledVector(normal, d);
     const m = new THREE.Matrix4().lookAt(eye, target, up);
     return { pos: eye, quat: new THREE.Quaternion().setFromRotationMatrix(m) };

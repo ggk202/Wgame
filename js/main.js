@@ -13,6 +13,7 @@ import { HostNet, ClientNet, makeCode } from './net.js';
 import { Sfx } from './audio.js';
 import { ExtView } from './extview.js';
 import { sasModes } from './attitude.js';
+import { Tutorial } from './tutorial.js';
 
 const ART = !!window.WOLFRAM_ARTIFACT;
 const QS = (() => { try { return new URLSearchParams(location.search); } catch (e) { return new URLSearchParams(); } })();
@@ -57,6 +58,12 @@ function initLobby() {
   if (save) { try { const s = JSON.parse(save); $('#btn-continue').style.display = ''; $('#btn-continue').textContent = `Continue saved game (leg ${s.nav.leg + 1}, ${DIFFICULTY[s.settings.difficulty].name})`; } catch (e) {} }
 
   $('#btn-solo').onclick = () => { G.sfx.unlock(); startHost('solo', who(), createState(settings())); };
+  $('#btn-tutorial').onclick = () => {
+    G.sfx.unlock();
+    const S = createState({ difficulty: 'recruit', storyteller: 'halley', length: 'short' });
+    S.tutorial = true; G.wantTutorial = true;
+    startHost('solo', who(), S);
+  };
   $('#btn-host').onclick = () => { G.sfx.unlock(); startHost('host', who(), createState(settings())); };
   $('#btn-continue').onclick = () => { G.sfx.unlock(); const s = JSON.parse(store.get(SAVE_KEY)); startHost(ART ? 'solo' : 'host', who(), s); };
   $('#btn-join').onclick = () => { G.sfx.unlock(); const code = $('#opt-code').value.trim().toUpperCase(); if (code.length < 4) return lobbyMsg('Enter the 5-character join code from the host.'); startClient(code, who()); };
@@ -177,7 +184,8 @@ function enterGame() {
   $('#codebox').style.display = '';
   if (G.S.debug) $('#btn-debug').style.display = '';
   G.hud.toast(G.touchMode ? 'Left stick: move · drag right side: look · USE on consoles' : 'Click to look around · WASD move · E use · H help', '');
-  if (G.S.t < 1) {
+  if (G.S.tutorial && !G.tut) { G.tut = new Tutorial(G); G.world.focusInset = () => (G.tut && window.innerWidth >= 900 ? 350 : 0); $('#codebox').textContent = 'TUTORIAL'; }
+  else if (G.S.t < 1) {
     logLocal('Welcome aboard the CSV Wolfram. Cargo: a fusion reactor core for Ganymede. Undock from the Helm on the Bridge (Deck 4) via the lift.', 'info');
   }
 }
@@ -275,6 +283,7 @@ function onKey(k, e) {
   if (k === 'escape') { if (G.panel.open) closePanel(); else toggleMenu(); return true; }
   if (k === 'tab') { if (!G.panel.open) { G.statusHeld = true; openPanel('status'); } return true; }
   if (k === 'h') { toggleHelp(); return true; }
+  if (k === 'n' && G.tut) { G.tut.skip(); return true; }
   if (k === 't' || k === 'enter') { openChat(); e.preventDefault(); return true; }
   if (k === '`' || k === 'f9') { if (G.S && G.S.debug) { G.panel.open && G.panelKind === 'debug' ? closePanel() : openPanel('debug'); } return true; }
   if (k === 'm') { G.sfx.setMuted(!G.sfx.muted); G.hud.toast(G.sfx.muted ? 'Sound muted' : 'Sound on'); return true; }
@@ -414,10 +423,11 @@ function frame(tms) {
     const t = [c(b('l') - b('j') + P.t[0]), c(b('u') - b('o') + P.t[1]), c(b('i') - b('k') + P.t[2])];
     const sig = r.join() + '|' + t.join(), active = sig !== '0,0,0|0,0,0';
     G.pilotT -= rdt;
-    if (sig !== G.pilotSent || (active && G.pilotT <= 0)) { act('att.cmd', { r, t }); G.pilotSent = sig; G.pilotT = 0.25; }
+    if (sig !== G.pilotSent || (active && G.pilotT <= 0)) { act('att.cmd', { r, t }); G.pilotSent = sig; G.pilotT = 0.2; }
     if (active && Math.random() < rdt * 6) G.sfx.noise(0.06, 0.05, 2600);
   } else if (G.pilotSent && G.pilotSent !== '0,0,0|0,0,0') { act('att.cmd', { r: [0, 0, 0], t: [0, 0, 0] }); G.pilotSent = ''; }
   if (G.panel.open) G.ext.render(S, rdt, now);
+  if (G.tut) G.tut.tick(rdt);
   G.sfx.setConsoleHum(!!G.world.focus && G.world.focusT > 0.5);
   { let near = 0; const me2 = meView(); if (me2) for (const id in G.world.comps) { const v = G.world.comps[id]; if (v.canvas && v.wasLive && v.group.parent && v.group.parent.visible) { const p = v.group.position; if (Math.hypot(p.x - me2.x, p.z - me2.z) < 7) near++; } } G.sfx.idle(rdt, !!G.world.focus, near); }
   G.hudT -= dt;
@@ -433,7 +443,7 @@ function pushMyPos(force) {
   G.net.send({ t: 'pos', x: G.ctl.x, z: G.ctl.z, d: G.ctl.deck, y: G.ctl.yaw });
 }
 function autosave() {
-  if (!G.S || G.role === 'client' || G.S.phase !== 'play') return;
+  if (!G.S || G.role === 'client' || G.S.phase !== 'play' || G.S.tutorial) return;
   const { fx, ...rest } = G.S;
   store.set(SAVE_KEY, JSON.stringify(rest));
 }

@@ -38,6 +38,7 @@ export function fireEvent(S, id, pts) {
 
 export function storyStep(S, dt) {
   const st = S.story, ST = STORYTELLERS[S.settings.storyteller];
+  if (S.tutorial) { st.nextAt = Math.max(st.nextAt, S.t + 60); return; } // the instructor is in charge
   st.tension = Math.max(0, st.tension - dt * 0.003);
   if (S.nav.state !== 'transit') { st.nextAt = Math.max(st.nextAt, S.t + 40); return; }
   const prog = S.nav.x / S.nav.L;

@@ -24,6 +24,20 @@ The ship and crew follow an ISS-era, NASA-style look. It's built entirely from p
 
 **Rendering:** PBR materials with an image-based environment, filmic tone mapping, soft shadow maps from each deck's ceiling key light and from the Sun on EVA. Planet atmospheres have no mesh shell. A camera-facing quad over each planet ray-marches single Rayleigh and Mie scattering per pixel, using real scale heights and optical depths for Earth, Mars (dust-dominated) and Jupiter. The glowing limb, daylight haze, reddened terminator and the planet's shadow in the air all come from that. Sunlight reaching the ground is filtered by air mass, and a procedural cloud deck drifts inside the atmosphere. Menu → Graphics sets Low (no shadows), Medium (the tablet default) or High.
 
+## Tutorial
+
+**New here? Play the tutorial** in the lobby starts a solo Recruit voyage with the storyteller asleep. An instructor box walks you through it in about 15 minutes and ticks each step off as you do it, live:
+
+1. Moving around and taking the lift.
+2. Using consoles.
+3. Undocking, the autopilot, turning by hand and SAS.
+4. The reactor and heat.
+5. Suiting up.
+6. A live-fire drill against an unarmed target hulk.
+7. A short manual docking at Phobos.
+
+Skip a step with `N`. At the end you can keep flying in free play (the storyteller wakes up) or return to the lobby. Tutorial games are never autosaved.
+
 ## Flying the ship
 
 The ship has a full rotational state. Its quaternion attitude and angular rates are driven by RCS thrusters, and the main drive pushes along wherever the nose points.

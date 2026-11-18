@@ -59,7 +59,7 @@ function sasTarget(S) {
 
 export function updateAttitude(S, dt) {
   const A = S.att;
-  if (S.t - (A.cmdT || 0) > 0.6) { A.cmd = [0, 0, 0]; A.tcmd = [0, 0, 0]; }
+  if (S.t - (A.cmdT || 0) > 1.2) { A.cmd = [0, 0, 0]; A.tcmd = [0, 0, 0]; }
   const w = A.w, alpha = [0, 0, 0];
   const pilot = A.cmd.some((c) => Math.abs(c) > 0.05);
   // SAS

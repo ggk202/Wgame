@@ -285,3 +285,23 @@ body.touch #panel .btn { padding: 9px 13px; }
 #panel .padbtns { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
 #panel .padb { padding: 8px 2px; font-size: 11px; touch-action: none; }
 .optrow select { font: inherit; background: #0c1620; color: var(--text); border: 1px solid #2c445c; border-radius: 6px; padding: 4px; }
+/* tutorial */
+.tutbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; border-color: #ff8a1e !important; color: #ffc27a !important; }
+.tutbtn span { font-size: 11px; font-weight: 400; opacity: 0.8; letter-spacing: 0; }
+#tut { position: absolute; left: 50%; top: calc(40px + env(safe-area-inset-top)); transform: translateX(-50%); width: min(470px, calc(100vw - 24px)); z-index: 30; pointer-events: auto;
+  background: rgba(14, 7, 1, 0.92); border: 1px solid #ff8a1e; box-shadow: 0 0 18px rgba(255, 138, 30, 0.25); color: #ffc27a; padding: 10px 14px 10px;
+  font-family: 'Share Tech Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.4; transition: border-color .3s, box-shadow .3s; }
+#tut.ok { border-color: #9dff7a; box-shadow: 0 0 22px rgba(157, 255, 122, 0.35); }
+#tut .tut-head { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.2em; color: #a8581a; }
+#tut .tut-title { font-size: 17px; color: #ff8a1e; margin: 2px 0 4px; letter-spacing: 0.04em; }
+#tut.ok .tut-title::after { content: '  ✓'; color: #9dff7a; }
+#tut kbd { border: 1px solid #a8581a; padding: 0 4px; border-radius: 3px; font-size: 12px; color: #ffd9a8; }
+#tut b { color: #ffd9a8; }
+#tut .tut-bar { height: 3px; background: #2a1204; margin: 8px 0 8px; }
+#tut .tut-bar i { display: block; height: 100%; background: #ff8a1e; transition: width .4s; }
+#tut .tut-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+#tut .btn { font-family: inherit; font-size: 12px; padding: 5px 10px; background: transparent; border: 1px solid #a8581a; color: #ffc27a; border-radius: 0; }
+#tut .tut-next { border-color: #ff8a1e; background: #ff8a1e; color: #140800; }
+@media (min-width: 900px) { body.focused #tut { top: calc(60px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); transform: none; width: 320px; font-size: 12px; } }
+body.focused #tut .tut-title { font-size: 14px; }
+body.touch #tut { top: calc(36px + env(safe-area-inset-top)); }
