@@ -42,6 +42,7 @@ export const PANELS = {
       B.pad('Translate (RCS)', [['FWD ⇡ I', 't', 2, 1], ['BACK ⇣ K', 't', 2, -1], ['◀ LEFT J', 't', 0, -1], ['RIGHT L ▶', 't', 0, 1], ['UP U', 't', 1, 1], ['DOWN O', 't', 1, -1]], (S) => S.nav.state === 'approach');
       B.buttons([
         { label: 'Request approach', act: 'helm.dock', show: (S) => S.nav.state === 'orbit', enabled: (S) => S.nav.state === 'orbit' },
+        { label: 'Undock & depart', act: 'helm.depart', cls: 'green', show: (S) => S.nav.state === 'docked', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1 },
         { label: 'Back off & re-approach', act: 'helm.reapproach', show: (S) => S.nav.state === 'approach' },
       ]);
       B.section('Attitude');
