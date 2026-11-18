@@ -22,7 +22,7 @@ The ship and crew follow an ISS-era, NASA-style look. It's built entirely from p
 * **Interior:** off-white equipment racks with placards, ISS-yellow handrails, strapped stowage bags, cable trays, laptop workstations and blue crew seats.
 * **Crew:** casual crew wear a polo in their player colour. Suited crew wear a white EMU-style spacesuit with a life-support backpack, chest control module, gold sun visor, helmet lights and colour-coded identification stripes. In first person, a helmet frame appears while suited.
 
-**Rendering:** PBR materials with an image-based environment, filmic tone mapping, soft shadow maps from each deck's ceiling key light and from the Sun on EVA. Planets are shader-lit with a day/night terminator, atmospheric limb scattering and a separately drifting procedural cloud layer. Menu → Graphics sets Low (no shadows), Medium (the tablet default) or High.
+**Rendering:** PBR materials with an image-based environment, filmic tone mapping, soft shadow maps from each deck's ceiling key light and from the Sun on EVA. Planet atmospheres have no mesh shell. A camera-facing quad over each planet ray-marches single Rayleigh and Mie scattering per pixel, using real scale heights and optical depths for Earth, Mars (dust-dominated) and Jupiter. The glowing limb, daylight haze, reddened terminator and the planet's shadow in the air all come from that. Sunlight reaching the ground is filtered by air mass, and a procedural cloud deck drifts inside the atmosphere. Menu → Graphics sets Low (no shadows), Medium (the tablet default) or High.
 
 ## Flying the ship
 

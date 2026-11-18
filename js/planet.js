@@ -75,56 +75,121 @@ const CLOUDS = {
   },
   phobos: (x, y, z) => { const n = fbm(x * 4, y * 4, z * 4, 5, 131); return [255, 236, 220, sat((n - 0.62) * 3) * 120]; },
 };
+// Atmospheres, in planet radii. Optical depths are for a vertical path through the whole atmosphere
+// (tau = beta * H), taken from real values: Earth's Rayleigh tau ~ 0.05/0.11/0.27 (R/G/B), Mie ~ 0.02;
+// Mars: almost no Rayleigh, dust-dominated (tau ~ 0.4, reddish single-scatter albedo); Jupiter: thin Rayleigh plus a yellowish haze.
 const ATM = {
-  earth: { color: new THREE.Color(0.35, 0.6, 1.0), strength: 1.3, halo: 1.0 },
-  phobos: { color: new THREE.Color(1.0, 0.62, 0.45), strength: 0.45, halo: 0.45 },
-  ganymede: { color: new THREE.Color(1.0, 0.85, 0.65), strength: 0.6, halo: 0.5 },
+  earth: { hR: 8 / 6371, hM: 1.2 / 6371, tauR: [0.046, 0.108, 0.265], tauM: 0.021, mieAlb: [0.9, 0.9, 0.9], g: 0.76, sun: 4.2 },
+  phobos: { hR: 11.1 / 3390, hM: 11.1 / 3390, tauR: [0.004, 0.008, 0.019], tauM: 0.22, mieAlb: [0.94, 0.72, 0.5], g: 0.63, sun: 4.2 },
+  ganymede: { hR: 27 / 69911, hM: 27 / 69911, tauR: [0.05, 0.12, 0.29], tauM: 0.05, mieAlb: [0.95, 0.85, 0.65], g: 0.7, sun: 4.2 },
 };
+const vec3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
 
 const surfVS = `varying vec3 vN; varying vec3 vW; varying vec2 vUv;
 void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }`;
-const surfFS = `uniform sampler2D map; uniform vec3 sunDir; uniform vec3 atmColor; uniform float atmStrength; uniform float alphaMode;
+// Surface: sunlight arrives through the atmosphere (air-mass formula), which reddens and dims it towards the terminator.
+const surfFS = `uniform sampler2D map; uniform vec3 sunDir; uniform vec3 tauR; uniform float tauM; uniform float alphaMode;
 varying vec3 vN; varying vec3 vW; varying vec2 vUv;
+vec3 sunTrans(float mu){
+  float z = degrees(acos(clamp(mu, -1.0, 1.0)));
+  float am = 1.0 / (max(mu, 0.0) + 0.50572 * pow(max(96.07995 - z, 0.01), -1.6364)); // Kasten–Young air mass
+  return exp(-(tauR + vec3(tauM * 1.1)) * min(am, 40.0));
+}
 void main(){
   vec4 tex = texture2D(map, vUv);
-  vec3 N = normalize(vN), V = normalize(cameraPosition - vW);
+  vec3 N = normalize(vN);
   float ndl = dot(N, sunDir);
-  float day = smoothstep(-0.08, 0.3, ndl);
-  vec3 col = tex.rgb * (0.025 + 1.15 * max(ndl, 0.0) * 0.9 + 0.1 * day);
-  float rim = pow(1.0 - max(dot(N, V), 0.0), 2.6);
-  col += atmColor * rim * atmStrength * smoothstep(-0.25, 0.35, ndl);
-  col = mix(col, col * vec3(1.0, 0.82, 0.7), (1.0 - smoothstep(0.0, 0.25, ndl)) * day * 0.6 * step(0.01, atmStrength)); // reddened terminator
-  gl_FragColor = vec4(col, alphaMode > 0.5 ? tex.a * (0.15 + 0.85 * day) : 1.0);
+  vec3 sunCol = sunTrans(ndl) * smoothstep(-0.03, 0.02, ndl);
+  vec3 col = tex.rgb * (0.012 + 1.05 * max(ndl, 0.0) * sunCol);
+  gl_FragColor = vec4(col, alphaMode > 0.5 ? tex.a * (0.12 + 0.88 * length(sunCol) * 0.58) : 1.0);
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
-const haloFS = `uniform vec3 sunDir; uniform vec3 atmColor; uniform float strength; varying vec3 vN; varying vec3 vW;
+// Atmosphere: no geometry sphere. A camera-facing quad just in front of the planet covers its disc on screen,
+// and every pixel ray-marches single Rayleigh + Mie scattering through the shell (16 view samples x 6 sun samples).
+// Output = in-scattered light, with alpha = transmittance so the planet behind is attenuated (dst * alpha + src).
+const atmVS = `uniform float topR; varying vec3 vW; varying vec3 vC; varying float vRw;
 void main(){
-  vec3 N = normalize(vN), V = normalize(cameraPosition - vW);
-  float f = pow(clamp(1.0 + dot(N, V) * 1.0, 0.0, 1.0), 3.0) * 0.0;
-  float edge = pow(max(0.0, 1.0 - abs(dot(N, V))), 5.0);
-  float lit = smoothstep(-0.35, 0.4, dot(N, sunDir));
-  gl_FragColor = vec4(atmColor * edge * lit * strength * 1.4 + f, 1.0);
+  vec3 c = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vC = c; vRw = length(modelMatrix[0].xyz);
+  float R = vRw * topR;
+  vec3 cv = (viewMatrix * vec4(c, 1.0)).xyz;
+  float d = length(cv);
+  float ang = asin(clamp(R / d, 0.0, 0.9999));
+  float z = min(cv.z + R, -0.2);                      // just in front of the planet, never behind the camera
+  vec3 dir = cv / d;
+  vec3 ctr = dir * (z / dir.z);                       // the disc centre projected onto that depth
+  float half_ = abs(z) * tan(ang) * 1.12 / max(abs(dir.z), 0.2);
+  vec3 vp = ctr + vec3(position.xy * half_, 0.0);
+  vW = (inverse(viewMatrix) * vec4(vp, 1.0)).xyz;
+  gl_Position = projectionMatrix * vec4(vp, 1.0);
+}`;
+const atmFS = `uniform vec3 sunDir; uniform float topR; uniform float hR; uniform float hM; uniform vec3 betaR; uniform float betaM; uniform vec3 mieAlb; uniform float g; uniform float sunI;
+varying vec3 vW; varying vec3 vC; varying float vRw;
+vec2 sph(vec3 o, vec3 d, float r){ float b = dot(o, d); float c = dot(o, o) - r * r; float h = b * b - c; if (h < 0.0) return vec2(1e9, -1e9); h = sqrt(h); return vec2(-b - h, -b + h); }
+void main(){
+  vec3 o = (cameraPosition - vC) / vRw, d = normalize(vW - cameraPosition);
+  vec2 ta = sph(o, d, topR);
+  if (ta.x > ta.y) discard;
+  vec2 tp = sph(o, d, 1.0);
+  float t0 = max(ta.x, 0.0), t1 = tp.x > 0.0 && tp.x < tp.y ? tp.x : ta.y;
+  if (t1 <= t0) discard;
+  const int N = 16; const int M = 6;
+  // sample more densely near the bottom of the shell along limb rays: quadratic spacing from the nearer end
+  float ds = (t1 - t0) / float(N);
+  vec3 sumR = vec3(0.0), sumM = vec3(0.0); vec3 tauV = vec3(0.0);
+  for (int i = 0; i < N; i++) {
+    vec3 p = o + d * (t0 + (float(i) + 0.5) * ds);
+    float h = length(p) - 1.0;
+    float dR = exp(-h / hR) * ds, dM = exp(-h / hM) * ds;
+    tauV += betaR * dR + vec3(betaM * 1.1 * dM);
+    vec2 tl = sph(p, sunDir, topR);
+    vec2 tg = sph(p, sunDir, 1.0);
+    if (tg.x > 0.0 && tg.x < tg.y) continue;          // this sample is in the planet's shadow
+    float ls = tl.y / float(M); float lR = 0.0, lM = 0.0;
+    for (int j = 0; j < M; j++) { float hh = length(p + sunDir * ((float(j) + 0.5) * ls)) - 1.0; lR += exp(-hh / hR) * ls; lM += exp(-hh / hM) * ls; }
+    vec3 att = exp(-(tauV + betaR * lR + vec3(betaM * 1.1 * lM)));
+    sumR += att * dR; sumM += att * dM;
+  }
+  float mu = dot(d, sunDir);
+  float pR = 0.0596831 * (1.0 + mu * mu);
+  float g2 = g * g;
+  float pM = 0.1193662 * (1.0 - g2) * (1.0 + mu * mu) / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * g * mu, 1.5));
+  vec3 L = sunI * (sumR * betaR * pR + sumM * betaM * mieAlb * pM);
+  vec3 T = exp(-tauV);
+  gl_FragColor = vec4(L, dot(T, vec3(0.3333)));
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
 
 export function buildPlanet(kind) {
   const sun = new THREE.Vector3(-0.6, 0.35, 0.72).normalize();
-  const atm = ATM[kind] || { color: new THREE.Color(0, 0, 0), strength: 0, halo: 0 };
+  const atm = ATM[kind];
   const res = kind === 'earth' ? [640, 320] : [512, 256];
   const map = sphereCanvas('s-' + kind, res[0], res[1], SURF[kind] || SURF.luna);
   const g = new THREE.Group();
+  const tauR = atm ? vec3(atm.tauR) : new THREE.Vector3(), tauM = atm ? atm.tauM : 0;
   const mk = (tex, r, alpha) => new THREE.Mesh(new THREE.SphereGeometry(r, 64, 32), new THREE.ShaderMaterial({
-    uniforms: { map: { value: tex }, sunDir: { value: sun }, atmColor: { value: atm.color }, atmStrength: { value: atm.strength * (alpha ? 0.4 : 1) }, alphaMode: { value: alpha ? 1 : 0 } },
+    uniforms: { map: { value: tex }, sunDir: { value: sun }, tauR: { value: tauR }, tauM: { value: tauM }, alphaMode: { value: alpha ? 1 : 0 } },
     vertexShader: surfVS, fragmentShader: surfFS, transparent: !!alpha, depthWrite: !alpha,
   }));
   const surface = mk(map, 1, false); g.add(surface);
-  if (CLOUDS[kind]) { const cl = mk(sphereCanvas('c-' + kind, 512, 256, CLOUDS[kind]), 1.012, true); g.add(cl); g.userData.clouds = cl; }
-  if (atm.halo > 0) {
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(1.06, 64, 32), new THREE.ShaderMaterial({
-      uniforms: { sunDir: { value: sun }, atmColor: { value: atm.color }, strength: { value: atm.halo } },
-      vertexShader: surfVS, fragmentShader: haloFS, side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  // cloud deck sits inside the atmosphere (a few km up), so it is lit and hazed by it
+  if (CLOUDS[kind]) { const cl = mk(sphereCanvas('c-' + kind, 512, 256, CLOUDS[kind]), 1 + (atm ? atm.hR * 0.9 : 0.004), true); g.add(cl); g.userData.clouds = cl; }
+  if (atm) {
+    const top = 1 + Math.max(atm.hR, atm.hM) * 10;
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      uniforms: {
+        sunDir: { value: sun }, topR: { value: top }, hR: { value: atm.hR }, hM: { value: atm.hM },
+        betaR: { value: tauR.clone().divideScalar(atm.hR) }, betaM: { value: atm.tauM / atm.hM },
+        mieAlb: { value: vec3(atm.mieAlb) }, g: { value: atm.g }, sunI: { value: atm.sun },
+      },
+      vertexShader: atmVS, fragmentShader: atmFS, transparent: true, depthWrite: false,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.SrcAlphaFactor,
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     }));
-    g.add(halo);
+    quad.frustumCulled = false; quad.renderOrder = 2;
+    g.add(quad); g.userData.atmosphere = quad;
   }
   g.userData.sun = sun;
   g.userData.setSun = (v) => { sun.copy(v).normalize(); };

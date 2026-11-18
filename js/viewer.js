@@ -39,8 +39,8 @@ CATS.push({ title: 'Stations & worlds', items: [
   { id: 'phobos', name: 'Phobos Station', sub: 'Mars', kind: 'station' },
   { id: 'ceres', name: 'Ceres Ring', sub: 'Belt · spin ring', kind: 'station' },
   { id: 'ganymede', name: 'Ganymede High', sub: 'Jupiter · twin rings', kind: 'station' },
-  { id: 'earth', name: 'Earth', sub: 'Atmospheric scattering + clouds', kind: 'planet' },
-  { id: 'phobos', name: 'Mars', sub: 'Thin dusty atmosphere', kind: 'planet' },
+  { id: 'earth', name: 'Earth', sub: 'Rayleigh + Mie scattering, clouds', kind: 'planet' },
+  { id: 'phobos', name: 'Mars', sub: 'Thin dusty CO₂ atmosphere', kind: 'planet' },
   { id: 'ganymede', name: 'Jupiter', sub: 'Banded clouds', kind: 'planet' },
 ] });
 CATS.push({ title: 'Whole decks', items: [{ id: 'exterior', name: 'EXTERIOR', sub: 'Hull, spine & drive (EVA area)', kind: 'exterior' }, ...DECKS.slice().reverse().map((d) => ({ id: 'deck' + d.id, name: d.full.split('— ')[1], sub: `Deck ${d.id}`, kind: 'deck', deck: d.id }))] });
@@ -102,7 +102,7 @@ function show(it) {
     const p = buildPlanet(it.id); p.scale.setScalar(6); root.add(p);
     const sun = new THREE.Vector3();
     tickFn = (now) => { sun.copy(camera.position).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.9).normalize(); p.userData.setSun(sun); p.userData.tick(now); };
-    info = `<h2>${it.name}</h2><p>${it.sub}. Shader-lit with a day/night terminator, limb scattering and a separate drifting cloud layer.</p>`;
+    info = `<h2>${it.name}</h2><p>${it.sub}. No atmosphere mesh: each pixel ray-marches Rayleigh and Mie scattering through the air, so the glowing limb, haze, reddened terminator and the planet's shadow fall out of the physics. Sunlight on the ground is filtered by air mass, and the cloud deck drifts inside the atmosphere.</p>`;
   } else if (it.kind === 'exterior') {
     const comps = {};
     root.add(buildExterior(comps));
