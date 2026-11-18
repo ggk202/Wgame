@@ -33,6 +33,10 @@ CATS.push({ title: 'Other ships', items: [
   { id: 'gunship', name: 'Gunship', sub: '80 m · twin railguns', kind: 'npc' },
   { id: 'frigate', name: 'Blockade frigate', sub: '110 m · heavy missiles', kind: 'npc' },
   { id: 'drone', name: 'Hijacked mining drone', sub: '30 m · kamikaze', kind: 'npc' },
+  { id: 'navy', name: 'Navy escort frigate', sub: '120 m · FFG-41 · patrolled lanes', kind: 'npc' },
+  { id: 'freighter', name: 'Independent freighter', sub: '95 m · container spine', kind: 'npc' },
+  { id: 'hauler', name: 'Crippled ore hauler', sub: '70 m · distress calls', kind: 'npc' },
+  { id: 'courier', name: 'Supply courier drone', sub: '8 m · Mission Control', kind: 'npc' },
 ] });
 CATS.push({ title: 'Stations & worlds', items: [
   { id: 'luna', name: 'Shackleton Yard', sub: 'Luna orbit · shipyard', kind: 'station' },
@@ -91,8 +95,8 @@ function show(it) {
     info = `<h2>Fire</h2><p>Grows with oxygen, spreads to nearby systems above 50% intensity, and is put out with an extinguisher, suppressant, or by venting the deck.</p>`;
   } else if (it.kind === 'npc') {
     const m = buildShip(it.id); root.add(m);
-    for (const p of m.userData.plumes) p.visible = true;
-    tickFn = (now) => { for (const p of m.userData.plumes) p.scale.setScalar(0.9 + 0.2 * Math.sin(now * 40 + p.id)); m.traverse((o) => { if (o.userData.blink) o.visible = Math.sin(now * 3 + o.id) > 0; }); };
+    for (const p of m.userData.plumes) { p.visible = true; p.scale.setScalar(0.2); } // short plumes so the view frames the ship
+    tickFn = (now) => { for (const p of m.userData.plumes) p.scale.setScalar(0.2 * (0.9 + 0.2 * Math.sin(now * 40 + p.id))); m.traverse((o) => { if (o.userData.blink) o.visible = Math.sin(now * 3 + o.id) > 0; }); };
     info = `<h2>${it.name}</h2><p>${it.sub}. Seen in combat through the optical telescope on the Fire Control and Sensor consoles: watch its attitude thrusters, drive plume and muzzle flashes. Its weapons bear along its nose, like ours.</p>`;
   } else if (it.kind === 'station') {
     const st = buildStation(it.id); root.add(st);

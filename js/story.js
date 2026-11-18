@@ -5,6 +5,7 @@ import { EVENTS } from './events.js';
 import { applyHit } from './combat.js';
 import { PDCS, eff } from './sim.js';
 import { streamExposure } from './flight.js';
+import { routeEventWeight, routeThreat } from './routes.js';
 
 // Semi-scripted beats: fire once when leg progress passes `p`.
 export const BEATS = [
@@ -21,7 +22,7 @@ export const BEATS = [
 
 export function threatPoints(S) {
   const ST = STORYTELLERS[S.settings.storyteller];
-  return (60 + (S.t / 60) * 3 + S.nav.leg * 35) * S.settings.threat * ST.threat * (S.effects.escortT > 0 ? 0.5 : 1);
+  return (60 + (S.t / 60) * 3 + S.nav.leg * 35) * S.settings.threat * ST.threat * routeThreat(S) * (S.effects.escortT > 0 ? 0.5 : 1);
 }
 
 export function fireEvent(S, id, pts) {
@@ -57,11 +58,11 @@ export function storyStep(S, dt) {
   if (S.t < st.nextAt) return;
   const sinceMajor = S.t - st.lastMajor;
   let cat;
-  if (sinceMajor > ST.majorGap && st.tension < 0.5 && S.effects.escortT <= 0 && chance(ST.majorChance)) cat = 'major';
-  else cat = weightedPick(Object.keys(ST.weights), (k) => ST.weights[k] * (k === 'minor' || k === 'malfunction' ? 1 - st.tension * 0.5 : 1));
+  if (sinceMajor > ST.majorGap && st.tension < 0.5 && S.effects.escortT <= 0 && chance(Math.min(0.95, ST.majorChance * routeEventWeight(S, 'major')))) cat = 'major';
+  else cat = weightedPick(Object.keys(ST.weights), (k) => ST.weights[k] * routeEventWeight(S, k) * (k === 'minor' || k === 'malfunction' ? 1 - st.tension * 0.5 : 1));
   const pool = Object.keys(EVENTS).filter((id) => EVENTS[id].cat === cat && (!EVENTS[id].can || EVENTS[id].can(S)));
   const recent = st.history.slice(-4).map((h) => h.id);
-  const id = weightedPick(pool, (id) => (recent.includes(id) ? 0.2 : 1));
+  const id = weightedPick(pool, (id) => (recent.includes(id) ? 0.2 : 1) * routeEventWeight(S, 'x', id) / (routeEventWeight(S, 'x') || 1));
   if (id) fireEvent(S, id);
   st.nextAt = S.t + rand(ST.interval[0], ST.interval[1]) * (cat === 'major' ? 1.7 : 1);
 }
@@ -97,6 +98,7 @@ export function updateEffects(S, dt) {
     if (E.showerT <= 0) { E.shower--; E.showerT = rand(4, 9); const ex = E.showerFrom ? streamExposure(S, E.showerFrom) : 1; if (chance(ex)) applyHit(S, rand(14, 30) * (0.5 + ex * 0.5), { label: 'Meteoroid strike', fireP: 0.15, breachP: 0.75 * ex, extBias: 0.4 }); else log(S, 'Meteoroid strike absorbed by the shadow shield', 'info'); }
   }
   for (const k of ['leakT', 'escortT', 'reactorRadT']) if (E[k] > 0) E[k] = Math.max(0, E[k] - dt);
+  if (E.visit) { E.visit.t -= dt; if (E.visit.t <= 0 || S.nav.state !== 'transit') E.visit = null; }
   // Nanite breach sealing (Recruit)
   if (S.settings.naniteBreach) for (const b of S.breaches) if (b.size < 0.7) { b.patch += dt / 40; }
   const sealed = S.breaches.filter((b) => b.patch >= 1);

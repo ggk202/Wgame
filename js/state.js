@@ -11,7 +11,7 @@ export function createState(opts = {}) {
   const difficulty = DIFFICULTY[opts.difficulty] ? opts.difficulty : 'spacer';
   const storyteller = STORYTELLERS[opts.storyteller] ? opts.storyteller : 'cassiopeia';
   const length = LENGTHS[opts.length] ? opts.length : 'standard';
-  const D = DIFFICULTY[difficulty];
+  const D = difficulty === 'custom' ? { ...DIFFICULTY.custom, ...(opts.custom || {}) } : DIFFICULTY[difficulty];
 
   const comps = {};
   for (const id of COMP_IDS) {
@@ -27,9 +27,9 @@ export function createState(opts = {}) {
     gameTime: 0,          // voyage seconds
     warp: LENGTHS[length].warp,
     paused: false,
-    phase: 'play',        // play | won | lost
+    phase: 'play', seed: Math.floor(Math.random() * 1e6),        // play | won | lost
     endReason: '',
-    settings: { difficulty, storyteller, length, ...D, warpBase: LENGTHS[length].warp },
+    settings: { difficulty, storyteller, length, ...D, style: D.style || difficulty, warpBase: LENGTHS[length].warp },
     comps,
     decks,
     breaches: [],         // {id, deck, a, y, size, patch}

@@ -52,7 +52,7 @@ export function setupTouch(root, hooks) {
     }
   };
   window.addEventListener('touchend', end); window.addEventListener('touchcancel', end);
-  window.addEventListener('touchstart', () => hooks.touchSeen && hooks.touchSeen(), { passive: true, capture: true });
+  window.addEventListener('touchstart', (e) => hooks.touchSeen && hooks.touchSeen(e), { passive: true, capture: true });
   for (const b of wrap.querySelectorAll('[data-b]')) {
     const name = b.dataset.b;
     b.addEventListener('touchstart', (e) => {
@@ -77,6 +77,8 @@ export function setupTouch(root, hooks) {
   return {
     setLabels(l) { for (const [k, v] of Object.entries(l)) { const b = wrap.querySelector(`[data-b="${k}"]`); if (b) { b.textContent = v || k.toUpperCase(); b.classList.toggle('dim', !v); } } },
     show(v) { wrap.style.display = v ? '' : 'none'; },
+    // keyboard on a tablet (e.g. an iPad with a Magic Keyboard but no trackpad): keep drag-to-look and the top buttons
+    hybrid(v) { wrap.classList.toggle('kbd', !!v); if (v) { wrap.style.display = ''; this.reset(); } },
     setFloat(on) { wrap.querySelector('#tvert').style.display = on ? '' : 'none'; },
     reset() { input.tfwd = 0; input.tright = 0; input.tup = 0; input.trepair = false; input.titem = false; knob.style.transform = ''; },
   };

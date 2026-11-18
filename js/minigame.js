@@ -242,7 +242,7 @@ export class RepairGame {
     if (!need) return false;
     this.init();
     this.id = id; this.need = need; this.jobKey = need.issues.map((i) => i.label).join('|');
-    this.diff = S.settings.difficulty;
+    this.diff = S.settings.style || S.settings.difficulty;
     this.speed = { recruit: 0.6, spacer: 0.8, veteran: 1, newtonian: 1.25 }[this.diff] || 1;
     this.hints = this.diff === 'recruit' || this.diff === 'spacer';
     this.used = {}; this.stage = 0; this.errors = 0; this.elapsed = 0; this.view = { yaw: 0, pitch: 0.03, dist: 1.28 }; this.action = null; this.tool = 'hand'; this.part = null; this.bit = 'PH2'; this.socket = '13';

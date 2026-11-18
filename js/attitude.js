@@ -44,7 +44,7 @@ export function sasModes(S) {
   const s = S.settings.sas;
   if (s === 'none') return ['off'];
   if (s === 'hold') return ['off', 'hold'];
-  return S.settings.difficulty === 'recruit' ? ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun', 'dock'] : ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun'];
+  return (S.settings.style || S.settings.difficulty) === 'recruit' ? ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun', 'dock'] : ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun'];
 }
 
 // Target direction (inertial) for a SAS pointing mode

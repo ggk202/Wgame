@@ -93,10 +93,10 @@ export class Builder {
     });
     return this._add(e, (S) => { const s = fn(S); if (s !== last) { e.innerHTML = s; last = s; } });
   }
-  canvas(w, h, draw) {
+  canvas(w, h, draw, showFn) {
     const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; c.className = 'pcanvas'; c.style.aspectRatio = `${w}/${h}`;
     const g = c.getContext('2d'); g.scale(2, 2);
-    return this._add(c, (S) => { g.clearRect(0, 0, w, h); draw(g, S, w, h); });
+    return this._add(c, (S) => { const on = showFn ? showFn(S) : true; c.style.display = on ? '' : 'none'; if (!on) return; g.clearRect(0, 0, w, h); draw(g, S, w, h); });
   }
   view(mode, showFn) {
     const e = document.createElement('div'); e.className = 'viewhost';
@@ -299,7 +299,7 @@ export class HUD {
       ${S.enc ? `<div class="sl"><span>COMBAT</span><b class="bad">${S.enc.enemies.filter((e) => !e.dead && !e.gone).length} hostile · ${S.enc.proj.filter((p) => p.from === 'them').length} inbound</b></div>` : ''}
       ${S.effects.stormWarn > 0 ? `<div class="sl"><span>STORM</span><b class="bad">PROTONS IN ${Math.ceil(S.effects.stormWarn)} s — SHELTER!</b></div>` : S.effects.stormT > 0 ? `<div class="sl"><span>STORM</span><b class="bad">PROTON STORM ${Math.ceil(S.effects.stormT)} s</b></div>` : ''}
       ${S.effects.debris > 0 ? `<div class="sl"><span>DEBRIS</span><b class="warn">impact in ${Math.ceil(S.effects.debris)} s</b></div>` : ''}`;
-    const d = S.decks[atmoDeck(me.deck)], P = d.o2 + d.n2 + d.co2;
+    const d = me.deck === 7 ? { o2: 21, n2: 79, co2: 0.04, temp: 21, rad: 0, p: 100 } : S.decks[atmoDeck(me.deck)], P = d.o2 + d.n2 + d.co2;
     const shelter = inShelter(me);
     let st = me.state === 'downed' ? `<div class="big bad">DOWN — ${Math.ceil(me.downT)} s until death. A crewmate needs a medkit.</div>`
       : me.state === 'dead' ? `<div class="big bad">DEAD — ${S.pods > 0 ? `thawing a backup crew member in ${Math.ceil(me.respawnT || 0)} s` : 'no backup crew left'}</div><div class="sl"><span>GHOST</span><b>${ghostLine(me)}</b></div>`
@@ -312,8 +312,8 @@ export class HUD {
       <div class="sl"><span>DOSE</span><b class="${cls(me.dose, 1, 3, true)}">${me.dose.toFixed(2)} Sv${shelter ? ' · SHELTERED' : ''}</b></div>
       <div class="sl"><span>HANDS</span><b>${me.item ? ITEMS[me.item.type].name + (me.item.type === 'ext' || me.item.type === 'spares' ? ` (${Math.max(0, Math.round(me.item.charge))}%)` : '') : '—'}</b></div>
       ${me.deck === EXT_DECK ? `<div class="sl"><span>EVA</span><b class="${me.suit ? 'warn' : 'bad'}">HARD VACUUM${me.suit ? '' : ' — NO SUIT!'}${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`
-        : `<div class="sl"><span>${me.deck === RING_DECK ? 'RING' : DECKS[me.deck].name.toUpperCase()}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`}
-      <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.5) ? 'bad' : ''}">${me.deck === RING_DECK ? `${S.ring.g.toFixed(2)} g spin${S.drive.g > 0.01 ? ` + ${S.drive.g.toFixed(2)} g thrust (floor tilts aft)` : ''}${S.ring.g < 0.04 && S.drive.g < 0.04 ? ' · FLOATING' : ''}` : `${S.drive.g.toFixed(2)} g${S.drive.g < 0.04 ? (me.deck === EXT_DECK ? ' · ZERO-G · JET PACK (Space/C up/down)' : ' · ZERO-G · FLOATING (Space/C up/down)') : ' THRUST — floors are down'}`}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK && !me.pod ? (me.tsnap ? ' · <b class="bad">UNTETHERED — clip on at a tether point (E)!</b>' : ` · tether ${Math.round((me.tether || 0) * 100)}% of ${EXT.tether} m${me.tWraps ? ` · snagged on the hull ×${me.tWraps}` : ''} · reels in above ${EXT.maxG} g`) : ''}</b></div>`;
+        : `<div class="sl"><span>${me.deck === RING_DECK ? 'RING' : me.deck === 7 ? 'STATION' : DECKS[me.deck] ? DECKS[me.deck].name.toUpperCase() : 'EVA'}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`}
+      <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.5) ? 'bad' : ''}">${me.deck === 7 ? '0.38 g station spin gravity' : me.deck === RING_DECK ? `${S.ring.g.toFixed(2)} g spin${S.drive.g > 0.01 ? ` + ${S.drive.g.toFixed(2)} g thrust (floor tilts aft)` : ''}${S.ring.g < 0.04 && S.drive.g < 0.04 ? ' · FLOATING' : ''}` : `${S.drive.g.toFixed(2)} g${S.drive.g < 0.04 ? (me.deck === EXT_DECK ? ' · ZERO-G · JET PACK (Space/C up/down)' : ' · ZERO-G · FLOATING (Space/C up/down)') : ' THRUST — floors are down'}`}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK && !me.pod ? (me.tsnap ? ' · <b class="bad">UNTETHERED — clip on at a tether point (E)!</b>' : ` · tether ${Math.round((me.tether || 0) * 100)}% of ${EXT.tether} m${me.tWraps ? ` · snagged on the hull ×${me.tWraps}` : ''} · reels in above ${EXT.maxG} g`) : ''}</b></div>`;
     document.body.classList.toggle('suited', !!me.suit && me.state === 'alive');
     // prompt
     if (ctx.ladder) this.prompt.innerHTML = `<b>On the trunk ladder</b> — ${ctx.touch ? 'stick up/down to climb · stick sideways at a deck to step off' : '<kbd>W</kbd>/<kbd>S</kbd> climb (look down to go down) · <kbd>Space</kbd>/<kbd>C</kbd> up/down · <kbd>A</kbd>/<kbd>D</kbd> at a deck to step off'}${ctx.ladderFloor ? ' · <b>landing</b>' : ''}`;
@@ -375,6 +375,9 @@ function promptFor(S, me, f, touch) {
   else if (f.kind === 'bay') parts.push(`<b>${f.label}</b>`, K('E', 'Experiments'));
   else if (f.kind === 'pod') parts.push(`<b>${f.label}</b>`, K('E', 'Board'));
   else if (f.kind === 'anchor') parts.push(`<b>${f.label}</b>`, K('E', 'Clip your tether here'));
+  else if (f.kind === 'npc') parts.push(`<b>${f.label}</b>`, K('E', 'Talk'));
+  else if (f.kind === 'stationexit') parts.push(`<b>${f.label}</b>`, K('E', 'Back aboard'));
+  else if (f.kind === 'kiosk') parts.push(`<b>${f.label}</b>`, K('E', 'Routes & departures'));
   else if (f.kind === 'spoke') parts.push(`<b>${f.label}</b>`, K('E', 'Climb to the hub'));
   else if (f.kind === 'player') {
     const p = S.players[f.id];

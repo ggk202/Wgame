@@ -17,7 +17,7 @@ export const BUNKS = [
 ];
 export function bunkPos(b) { if (b.deck === RING_DECK) return { x: b.x, z: b.z }; return polar(b.a, b.r); }
 export const FATIGUE = { awake: 100 / (32 * 60), work: 0.6, sleepHab: 100 / 240, sleepZeroG: 100 / 300, sleepRing: 100 / 130, limit: 100 };
-const fatigueRate = (S) => ({ recruit: 0.45, spacer: 0.7, veteran: 1, newtonian: 1.2 }[S.settings.difficulty] || 1);
+const fatigueRate = (S) => (S.settings.fatigue !== undefined ? S.settings.fatigue : { recruit: 0.45, spacer: 0.7, veteran: 1, newtonian: 1.2 }[S.settings.difficulty] || 1);
 
 // ---------------- science ----------------
 // requirement kinds: zerog (no thrust, not in the ring), spin (ring g range), burn (drive g), sun (nose on the Sun),
@@ -68,7 +68,7 @@ function updateScience(S, dt) {
     if (run.p >= 1) {
       X.bays[bay] = null; X.done[run.ex] = (X.done[run.ex] || 0) + 1;
       const first = X.done[run.ex] === 1;
-      const cr = Math.round(ex.credits * (first ? 1 : 0.5));
+      const cr = Math.round(ex.credits * (first ? 1 : 0.5) * (S.nav.route === 'sun' && S.nav.state === 'transit' ? 1.5 : 1));
       S.credits += cr;
       let up = '';
       if (ex.upg && first) { S.upg = S.upg || {}; S.upg[ex.upg] = true; up = ` Upgrade unlocked: ${UPG_TEXT[ex.upg]}.`; }
@@ -102,7 +102,7 @@ export const HAILS = {
     opts: [{ id: 'help', label: 'Send medical guidance and drop 2 seals' }, { id: 'relay', label: 'Relay to Mission Control' }, { id: 'decline', label: 'Decline' }],
     window: 1800, urgent: true,
     ok: (S, o) => {
-      if (o === 'help') { if ((S.stores.seal || 0) >= 2) { S.stores.seal -= 2; S.credits += 18; return 'They made it. Belt Mutual pays an 18 credit salvage-assist bounty.'; } return 'You had no seals to spare; the guidance alone kept them alive. Thank you, Wolfram.'; }
+      if (o === 'help') { S.qc = S.qc || {}; S.qc.rescue = (S.qc.rescue || 0) + 1; if ((S.stores.seal || 0) >= 2) { S.stores.seal -= 2; S.credits += 18; return 'They made it. Belt Mutual pays an 18 credit salvage-assist bounty.'; } return 'You had no seals to spare; the guidance alone kept them alive. Thank you, Wolfram.'; }
       if (o === 'relay') { S.credits += 4; return 'Mission Control routed a tug. A small courtesy payment follows.'; }
       return 'Understood, Wolfram. Good luck.';
     },
@@ -234,6 +234,7 @@ function updatePod(S, dt) {
 export function deliverCargo(S, c) {
   S.cargo = (S.cargo || []).filter((x) => x.id !== c.id);
   if (c.kind === 'drone') { if (S.drones) S.drones.total++; log(S, 'Drone recovered and back in the bay. It needs a refit but it is ours.', 'good'); return; }
+  S.qc = S.qc || {}; S.qc.salvage = (S.qc.salvage || 0) + 1;
   const k = pick(Object.keys(PARTS)), n = 2 + Math.floor(Math.random() * 3), cr = 10 + Math.floor(Math.random() * 15);
   S.stores[k] = (S.stores[k] || 0) + n; S.credits += cr;
   log(S, `Container cracked open in the bay: ${n}× ${PARTS[k].name.toLowerCase()} and salvage worth ${cr} credits.`, 'good');

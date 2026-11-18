@@ -217,7 +217,7 @@ export class ExtView {
     const cx = w / 2, cy = h / 2;
     g.strokeStyle = O; g.beginPath(); g.moveTo(cx - 60, cy); g.lineTo(cx - 12, cy); g.moveTo(cx + 12, cy); g.lineTo(cx + 60, cy); g.moveTo(cx, cy - 60); g.lineTo(cx, cy - 12); g.moveTo(cx, cy + 12); g.lineTo(cx, cy + 60); g.stroke();
     g.beginPath(); g.arc(cx, cy, 30, 0, 7); g.stroke();
-    const P = S.prox, diff = S.settings.difficulty;
+    const P = S.prox, diff = S.settings.style || S.settings.difficulty;
     g.fillStyle = B; g.fillText('DOCKING CAMERA  · CENTRELINE', 10, 18);
     if (!P) { g.fillText(S.nav.state === 'docked' ? 'HARD DOCKED' : S.nav.state === 'docking' ? 'LATCHING…' : 'STANDBY', 10, 34); return; }
     const A = S.att, range = Math.max(0, P.p[2]), closing = -P.v[2], lat = Math.hypot(P.p[0], P.p[1]);

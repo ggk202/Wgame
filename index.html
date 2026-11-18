@@ -17,6 +17,7 @@
 </head>
 <body>
   <div id="sleepfx"></div>
+  <div id="fpsmeter" style="display:none"></div>
   <div id="practice" class="overlay" style="display:none">
     <div class="box pr-box">
       <h2>Repair practice</h2>
@@ -43,6 +44,7 @@
         <h3>New voyage</h3>
         <label>Difficulty <select id="opt-diff"></select></label>
         <div class="desc" id="diff-desc"></div>
+        <div id="custom-diff" style="display:none"></div>
         <label>Storyteller <select id="opt-story"></select></label>
         <div class="desc" id="story-desc"></div>
         <label>Campaign length <select id="opt-len"></select></label>
@@ -93,7 +95,19 @@
       <button id="btn-lock" class="btn big">Lock mouse pointer</button>
       <div class="optrow"><label for="opt-sens">Look sensitivity</label><input id="opt-sens" type="range" min="0.3" max="3" step="0.1"><b id="sens-val"></b></div>
       <div class="optrow"><label for="opt-invert">Invert vertical look</label><input id="opt-invert" type="checkbox"></div>
-      <div class="optrow"><label for="opt-quality">Graphics</label><select id="opt-quality"><option value="low">Low (no shadows)</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+      <div class="optrow"><label for="opt-quality">Graphics</label><select id="opt-quality"><option value="low">Low (no shadows)</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></div>
+      <details id="gfx-adv"><summary>Advanced graphics</summary>
+        <div class="optrow"><label>Resolution scale</label><input id="gx-res" type="range" min="0.4" max="1" step="0.05"><b id="gx-res-v"></b></div>
+        <div class="optrow"><label>Shadow detail</label><select id="gx-shadow"><option value="0">Off</option><option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option></select></div>
+        <div class="optrow"><label>Soft shadows</label><input id="gx-soft" type="checkbox"></div>
+        <div class="optrow"><label>Sunlight through windows</label><input id="gx-sunin" type="checkbox"></div>
+        <div class="optrow"><label>Field of view</label><input id="gx-fov" type="range" min="55" max="100" step="1"><b id="gx-fov-v"></b></div>
+        <div class="optrow"><label>Exposure</label><input id="gx-exp" type="range" min="0.6" max="1.6" step="0.05"><b id="gx-exp-v"></b></div>
+        <div class="optrow"><label>Frame-rate cap</label><select id="gx-fps"><option value="0">Off</option><option value="30">30</option><option value="60">60</option></select></div>
+        <div class="optrow"><label>Head bob</label><input id="gx-bob" type="checkbox"></div>
+        <div class="optrow"><label>Camera shake</label><input id="gx-shake" type="checkbox"></div>
+        <div class="optrow"><label>Show frame rate</label><input id="gx-stats" type="checkbox"></div>
+      </details>
       <button id="btn-copycode" class="btn big">Copy join code</button>
       <button id="btn-pause" class="btn big">Pause simulation</button>
       <button id="btn-save" class="btn big">Save game (this browser)</button>

@@ -108,13 +108,18 @@ void main(){
 // Atmosphere: no geometry sphere. A camera-facing quad just in front of the planet covers its disc on screen,
 // and every pixel ray-marches single Rayleigh + Mie scattering through the shell (16 view samples x 6 sun samples).
 // Output = in-scattered light, with alpha = transmittance so the planet behind is attenuated (dst * alpha + src).
-const atmVS = `uniform float topR; varying vec3 vW; varying vec3 vC; varying float vRw;
+const atmVS = `uniform float topR; uniform float pxH; varying vec3 vW; varying vec3 vC; varying float vRw; varying float vK;
 void main(){
   vec3 c = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   vC = c; vRw = length(modelMatrix[0].xyz);
-  float R = vRw * topR;
   vec3 cv = (viewMatrix * vec4(c, 1.0)).xyz;
   float d = length(cv);
+  // a distant planet's shell is thinner than a pixel and shimmers as it moves: thicken it (keeping its optical
+  // depth) until it spans about three pixels, so the limb stays a steady glow
+  float pixAng = 2.0 / (projectionMatrix[1][1] * pxH);
+  float shellAng = (topR - 1.0) * vRw / d;
+  vK = max(1.0, 3.0 * pixAng / max(shellAng, 1e-7));
+  float R = vRw * (1.0 + (topR - 1.0) * vK);
   float ang = asin(clamp(R / d, 0.0, 0.9999));
   float z = min(cv.z + R, -0.2);                      // just in front of the planet, never behind the camera
   vec3 dir = cv / d;
@@ -125,11 +130,13 @@ void main(){
   gl_Position = projectionMatrix * vec4(vp, 1.0);
 }`;
 const atmFS = `uniform vec3 sunDir; uniform float topR; uniform float hR; uniform float hM; uniform vec3 betaR; uniform float betaM; uniform vec3 mieAlb; uniform float g; uniform float sunI;
-varying vec3 vW; varying vec3 vC; varying float vRw;
+varying vec3 vW; varying vec3 vC; varying float vRw; varying float vK;
 vec2 sph(vec3 o, vec3 d, float r){ float b = dot(o, d); float c = dot(o, o) - r * r; float h = b * b - c; if (h < 0.0) return vec2(1e9, -1e9); h = sqrt(h); return vec2(-b - h, -b + h); }
 void main(){
+  float topK = 1.0 + (topR - 1.0) * vK, hRk = hR * vK, hMk = hM * vK;
+  vec3 bR = betaR / vK; float bM = betaM / vK;
   vec3 o = (cameraPosition - vC) / vRw, d = normalize(vW - cameraPosition);
-  vec2 ta = sph(o, d, topR);
+  vec2 ta = sph(o, d, topK);
   if (ta.x > ta.y) discard;
   vec2 tp = sph(o, d, 1.0);
   float t0 = max(ta.x, 0.0), t1 = tp.x > 0.0 && tp.x < tp.y ? tp.x : ta.y;
@@ -141,21 +148,21 @@ void main(){
   for (int i = 0; i < N; i++) {
     vec3 p = o + d * (t0 + (float(i) + 0.5) * ds);
     float h = length(p) - 1.0;
-    float dR = exp(-h / hR) * ds, dM = exp(-h / hM) * ds;
-    tauV += betaR * dR + vec3(betaM * 1.1 * dM);
-    vec2 tl = sph(p, sunDir, topR);
+    float dR = exp(-h / hRk) * ds, dM = exp(-h / hMk) * ds;
+    tauV += bR * dR + vec3(bM * 1.1 * dM);
+    vec2 tl = sph(p, sunDir, topK);
     vec2 tg = sph(p, sunDir, 1.0);
     if (tg.x > 0.0 && tg.x < tg.y) continue;          // this sample is in the planet's shadow
     float ls = tl.y / float(M); float lR = 0.0, lM = 0.0;
-    for (int j = 0; j < M; j++) { float hh = length(p + sunDir * ((float(j) + 0.5) * ls)) - 1.0; lR += exp(-hh / hR) * ls; lM += exp(-hh / hM) * ls; }
-    vec3 att = exp(-(tauV + betaR * lR + vec3(betaM * 1.1 * lM)));
+    for (int j = 0; j < M; j++) { float hh = length(p + sunDir * ((float(j) + 0.5) * ls)) - 1.0; lR += exp(-hh / hRk) * ls; lM += exp(-hh / hMk) * ls; }
+    vec3 att = exp(-(tauV + bR * lR + vec3(bM * 1.1 * lM)));
     sumR += att * dR; sumM += att * dM;
   }
   float mu = dot(d, sunDir);
   float pR = 0.0596831 * (1.0 + mu * mu);
   float g2 = g * g;
   float pM = 0.1193662 * (1.0 - g2) * (1.0 + mu * mu) / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * g * mu, 1.5));
-  vec3 L = sunI * (sumR * betaR * pR + sumM * betaM * mieAlb * pM);
+  vec3 L = sunI * (sumR * bR * pR + sumM * bM * mieAlb * pM);
   vec3 T = exp(-tauV);
   gl_FragColor = vec4(L, dot(T, vec3(0.3333)));
   #include <tonemapping_fragment>
@@ -180,7 +187,7 @@ export function buildPlanet(kind) {
     const top = 1 + Math.max(atm.hR, atm.hM) * 10;
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
       uniforms: {
-        sunDir: { value: sun }, topR: { value: top }, hR: { value: atm.hR }, hM: { value: atm.hM },
+        sunDir: { value: sun }, topR: { value: top }, pxH: { value: 800 }, hR: { value: atm.hR }, hM: { value: atm.hM },
         betaR: { value: tauR.clone().divideScalar(atm.hR) }, betaM: { value: atm.tauM / atm.hM },
         mieAlb: { value: vec3(atm.mieAlb) }, g: { value: atm.g }, sunI: { value: atm.sun },
       },
@@ -193,6 +200,7 @@ export function buildPlanet(kind) {
   }
   g.userData.sun = sun;
   g.userData.setSun = (v) => { sun.copy(v).normalize(); };
+  g.userData.setRes = (h) => { if (g.userData.atmosphere) g.userData.atmosphere.material.uniforms.pxH.value = h; };
   g.userData.tick = (now) => { surface.rotation.y = now * 0.002; if (g.userData.clouds) g.userData.clouds.rotation.y = now * 0.0032; };
   return g;
 }

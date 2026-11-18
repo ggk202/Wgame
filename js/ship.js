@@ -3,6 +3,7 @@
 // cargo modules (starboard airlock), the spine truss with propellant tanks and radiator wings, drive bus, shadow
 // shield and the magnetic nozzle. Mostly symmetric, with the practical asymmetries a working ship collects.
 import * as THREE from 'three';
+import { hullSDF, hullNormal } from './hull.js';
 import { COMPS, COMP_IDS, EXT, RING } from './config.js';
 import { SL, extNormal } from './hull.js';
 import { PAL, mat, metal, emis, texMat, mliTex, goldMat, radiatorTex, grateTex, decalTex, screenTex, textSprite, struts } from './models.js';
@@ -153,8 +154,9 @@ export function buildExtComp(kind) {
   }
   const bb = new THREE.Box3().setFromObject(g);
   const light = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), emis(0x40ff80)); g.add(light);
-  light.position.set(bb.max.x - 0.15, Math.min(bb.max.y, 3) + 0.1, bb.max.z - 0.15);
+  light.position.set(Math.min(bb.max.x * 0.5, 0.45), 0.32, Math.min(bb.max.z * 0.5, 0.45));
   if (wing) light.position.set(0.9, 1.75, 0.9);
+  else { const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.32, 6), M.grey); stalk.position.set(light.position.x, 0.16, light.position.z); g.add(stalk); }
   return { group: g, screen, glow, light, wing, spin, gat, lids, height: Math.min(4, bb.max.y), ...extra };
 }
 
@@ -281,15 +283,6 @@ export function buildShipExterior(compsOut) {
 
   // engineering and cargo: coolant manifolds, vent stacks, a work-pod parked on the port side, a folded crane
   for (const s of [-1, 1]) { add(new THREE.CylinderGeometry(0.22, 0.22, 11, 10), M.copper, s * 9.2, -8.2, -53, Math.PI / 2); add(new THREE.CylinderGeometry(0.22, 0.22, 11, 10), M.blue, s * 9.6, -7.6, -53, Math.PI / 2); }
-  { // work pod (port side), clamped to a berthing ring
-    const pod = new THREE.Group(); pod.position.set(-R - 2.2, -2.5, -44); g.add(pod);
-    const pa = shipAdder(pod);
-    pa(new THREE.CylinderGeometry(1.2, 1.2, 0.5, 20), M.grey, 0.9, 0, 0, 0, 0, Math.PI / 2);
-    pa(new THREE.SphereGeometry(1.6, 24, 16), M.white, -0.9, 0, 0);
-    pa(new THREE.CircleGeometry(0.75, 20), M.glassD, -2.35, 0.3, 0, 0, -Math.PI / 2);
-    for (const s of [-1, 1]) { pa(new THREE.CylinderGeometry(0.08, 0.06, 1.6, 8), M.grey, -1.6, -0.7, s * 0.9, 0, 0, 0.7); pa(new THREE.BoxGeometry(0.3, 0.3, 0.3), M.dark, -2.2, -1.3, s * 0.9); }
-    pa(new THREE.BoxGeometry(0.6, 0.6, 0.6), M.gold, -0.9, 1.6, 0);
-  }
   { // folded crane boom, dorsal port quarter of the cargo module
     const base = new THREE.Vector3(-6.4, 10.8, -38.6);
     add(new THREE.CylinderGeometry(0.6, 0.7, 0.8, 16), M.grey, base.x, base.y, base.z, 0, 0, 0.5);
@@ -369,8 +362,18 @@ export function buildShipExterior(compsOut) {
   for (const [p, c] of [[[-R - 0.3, 0, -88], 0xff2020], [[R + 0.3, 0, -88], 0x20ff40], [[-SL.rad.x1, 0.4, SL.rad.z0], 0xff2020], [[SL.rad.x1, 0.4, SL.rad.z0], 0x20ff40], [[0, SL.shieldR, SL.shield[0]], 0xffffff], [[0, R + 0.3, -60], 0xffffff]]) {
     const l = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), emis(c, 1.4)); l.position.set(...p); l.userData.blink = c === 0xffffff; l.userData.keep = true; g.add(l); navs.push(l);
   }
+  // Anything that would otherwise hang in space gets a strut down to the nearest point of the hull and a foot plate.
+  const mount = (pos, r = 0.08) => {
+    const p = pos.clone(); let d = hullSDF(p.x, p.y, p.z);
+    if (d < 0.12) return;
+    for (let i = 0; i < 8 && Math.abs(d) > 0.02; i++) { const n = hullNormal(p.x, p.y, p.z); p.x -= n[0] * d; p.y -= n[1] * d; p.z -= n[2] * d; d = hullSDF(p.x, p.y, p.z); }
+    const D = new THREE.Vector3().subVectors(pos, p), len = D.length(); if (len < 0.1 || len > 12) return;
+    const st = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.3, len, 10), M.grey); st.position.copy(p).addScaledVector(D, 0.5); st.quaternion.setFromUnitVectors(Y, D.clone().normalize()); g.add(st);
+    const n = hullNormal(p.x, p.y, p.z), foot = new THREE.Mesh(new THREE.CylinderGeometry(r * 3, r * 3.4, 0.08, 14), M.dark); foot.position.copy(p); foot.quaternion.setFromUnitVectors(Y, new THREE.Vector3(...n)); g.add(foot);
+  };
+  for (const l of navs) mount(l.position, 0.05);
   // external camera housings
-  for (const c of EXT_CAMS) { const cam = new THREE.Group(); cam.position.set(...c.pos); g.add(cam); const b = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.5), M.white); cam.add(b); const l = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.12, 12), M.glassD); l.rotation.x = Math.PI / 2; l.position.z = -0.3; cam.add(l); cam.lookAt(...c.look); }
+  for (const c of EXT_CAMS) { mount(new THREE.Vector3(...c.pos), 0.06); const cam = new THREE.Group(); cam.position.set(...c.pos); g.add(cam); const b = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.5), M.white); cam.add(b); const l = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.12, 12), M.glassD); l.rotation.x = Math.PI / 2; l.position.z = -0.3; cam.add(l); cam.lookAt(...c.look); }
 
   // external components
   for (const id of COMP_IDS) {
@@ -385,6 +388,10 @@ export function buildShipExterior(compsOut) {
     }
     built.group.userData.keep = true;
     g.add(built.group);
+    { // pedestal from the module's base down to the hull, if it stands proud of it
+      const base = built.group.position.clone();
+      if (hullSDF(base.x, base.y, base.z) > 0.12) mount(base, id === 'radA' || id === 'radB' ? 0.25 : 0.32);
+    }
     const label = textSprite(c.name, { width: Math.min(2.2, 0.07 * c.name.length + 0.3), size: 30 });
     label.position.copy(built.group.position).addScaledVector(n, built.height + 1.0);
     g.add(label);

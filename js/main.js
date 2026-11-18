@@ -1,11 +1,12 @@
 // WOLFRAM — boot, lobby, game loop, networking glue.
+import { CUSTOM_DIFF } from './config.js';
 import { VERSION, DIFFICULTY, STORYTELLERS, LENGTHS, PLAYER_COLORS, COMPS, COMP_IDS, DECKS, LIFT_A, SHAFT_R, WAYPOINTS, EXT, EXT_DECK, AIRLOCK, ROOM_R, RING, RING_DECK } from './config.js';
 import { polar, fmtTime, clamp } from './util.js';
 import { createState, newPlayer, extDeck } from './state.js';
 import { step } from './sim.js';
 import { applyAction } from './actions.js';
 import { World } from './world.js';
-import { Controller, input, prefs, savePrefs } from './player.js';
+import { normKey, Controller, input, prefs, savePrefs } from './player.js';
 import { isTouchDevice, setupTouch } from './touch.js';
 import { HUD, PanelView, $, esc } from './ui.js';
 import { PANELS, screenInfo } from './panels.js';
@@ -47,7 +48,29 @@ function initLobby() {
     $('#diff-desc').textContent = DIFFICULTY[$('#opt-diff').value].desc;
     $('#story-desc').textContent = STORYTELLERS[$('#opt-story').value].desc;
   };
-  $('#opt-diff').onchange = desc; $('#opt-story').onchange = desc; desc();
+  // custom difficulty: one control per knob, remembered in this browser
+  let custom = { ...DIFFICULTY.custom };
+  try { Object.assign(custom, JSON.parse(localStorage.getItem('wolfram-custom') || '{}')); } catch (e) { /* ignore */ }
+  const saveCustom = () => { try { localStorage.setItem('wolfram-custom', JSON.stringify(custom)); } catch (e) { /* private mode */ } };
+  const cd = $('#custom-diff');
+  cd.innerHTML = CUSTOM_DIFF.map(([k, t, label]) => {
+    const v = custom[k];
+    if (t === 'bool') return `<label class="cd-row"><span>${label}</span><input type="checkbox" data-k="${k}" ${v ? 'checked' : ''}></label>`;
+    if (Array.isArray(t) && typeof t[0] === 'number') return `<label class="cd-row"><span>${label}</span><input type="range" data-k="${k}" min="${t[0]}" max="${t[1]}" step="${t[2]}" value="${v}"><b>${v}</b></label>`;
+    const opts = t.map((o) => (Array.isArray(o) ? o : [o, o[0].toUpperCase() + o.slice(1)]));
+    return `<label class="cd-row"><span>${label}</span><select data-k="${k}">${opts.map(([ov, ol]) => `<option value="${ov}" ${String(v) === String(ov) ? 'selected' : ''}>${ol}</option>`).join('')}</select></label>`;
+  }).join('');
+  cd.querySelectorAll('[data-k]').forEach((el) => (el.oninput = el.onchange = () => {
+    const k = el.dataset.k;
+    if (el.type === 'checkbox') custom[k] = el.checked;
+    else if (el.type === 'range') { custom[k] = +el.value; el.nextElementSibling.textContent = el.value; }
+    else custom[k] = el.value === 'false' ? false : el.value;
+    saveCustom();
+  }));
+  const desc0 = desc;
+  const descC = () => { desc0(); cd.style.display = $('#opt-diff').value === 'custom' ? '' : 'none'; };
+  $('#opt-diff').onchange = descC; $('#opt-story').onchange = desc; descC();
+  G.customDiff = () => custom;
   const name = store.get('wolfram.name') || 'Crew-' + Math.floor(Math.random() * 90 + 10);
   $('#opt-name').value = name;
   let color = store.get('wolfram.color') || PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
@@ -57,7 +80,7 @@ function initLobby() {
   sw.onclick = (e) => { const b = e.target.closest('.sw'); if (b) { color = b.dataset.c; mark(); } };
   mark();
   const who = () => { const n = $('#opt-name').value.trim().slice(0, 16) || 'Crew'; store.set('wolfram.name', n); store.set('wolfram.color', color); return { name: n, color }; };
-  const settings = () => ({ difficulty: $('#opt-diff').value, storyteller: $('#opt-story').value, length: $('#opt-len').value });
+  const settings = () => ({ difficulty: $('#opt-diff').value, storyteller: $('#opt-story').value, length: $('#opt-len').value, custom: G.customDiff ? G.customDiff() : undefined });
 
   if (ART) { document.body.classList.add('artifact'); }
   const save = store.get(SAVE_KEY);
@@ -165,7 +188,7 @@ function hostOnMsg(pid, m) {
   }
   const p = S.players[pid];
   if (!p) return;
-  if (m.t === 'pos') { if (p.state !== 'dead' || p.ghost === 'scout') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, RING_DECK); p.yaw = m.y; p.teth = Array.isArray(m.tp) ? m.tp.slice(0, 16) : null; p.tsnap = !!m.sn; } }
+  if (m.t === 'pos') { if (p.state !== 'dead' || p.ghost === 'scout') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, 7); p.yaw = m.y; p.teth = Array.isArray(m.tp) ? m.tp.slice(0, 16) : null; p.tsnap = !!m.sn; } }
   else if (m.t === 'act') applyAction(S, pid, m.a, m.args || {});
   else if (m.t === 'chat') { const msg = { t: 'chat', from: p.name, color: p.color, text: String(m.text).slice(0, 200) }; G.net.broadcast(msg); showChat(msg); }
 }
@@ -210,15 +233,20 @@ function enterGame() {
     G.world.onScreenBoot = (id, dist) => { const v = Math.max(0, 1 - dist / 14); if (v > 0.05) { G.sfx.crtOn(v * 0.5); G.sfx.relayBank(3, 0.8, v * 0.7); } };
     G.hud = new HUD($('#hud'));
     G.panel = new PanelView($('#panel'), panelCtx());
-    G.touchMode = isTouchDevice();
+    G.touchMode = isTouchDevice(); G.inputMode = G.touchMode ? 'touch' : 'mouse';
     G.ctl.bindPointer($('#view'), {
       uiOpen: () => G.panel.open || G.menuOpen || G.chatOpen || (G.repair && G.repair.open) || (G.tablet && G.tablet.open) || $('#help').style.display !== 'none',
       key: onKey, keyUp: onKeyUp,
-      mouseSeen: () => setInputMode('mouse'), keyboardSeen: () => { if (G.touch) setInputMode('mouse'); },
+      mouseSeen: () => { G.mouseSeen = true; setInputMode('mouse'); }, keyboardSeen: () => { if (G.touch) setInputMode(G.mouseSeen ? 'mouse' : 'kbd'); },
       lockChange: (on) => { if (on) setInputMode('mouse'); },
       lockError: () => G.hud.toast('This browser refused pointer lock. Hold the mouse button and drag to look instead.', 'warn'),
     });
-    if (G.touchMode) G.touch = setupTouch(document.body, { button: onTouchButton, unlockAudio: () => G.sfx.unlock(), touchSeen: () => setInputMode('touch') });
+    if (G.touchMode) G.touch = setupTouch(document.body, { button: onTouchButton, unlockAudio: () => G.sfx.unlock(), touchSeen: (e) => {
+      // with a keyboard attached, dragging on the view or tapping panels and the top buttons keeps the keyboard layout
+      const t = e && e.target;
+      if (G.inputMode === 'kbd' && t && t.closest && (t.id === 'lookpad' || t.closest('#ttop') || t.closest('#panel') || t.closest('#repair') || t.closest('#tablet') || t.closest('.overlay') || e.touches[0].clientX > window.innerWidth * 0.35)) return;
+      setInputMode('touch');
+    } });
     document.addEventListener('pointerdown', () => G.sfx.unlock(), { once: false });
     setupMenus();
     requestAnimationFrame(frame);
@@ -239,13 +267,17 @@ function enterGame() {
 }
 // Switch HUD/control layout between touch and keyboard+mouse (e.g. an iPad with a Magic Keyboard or trackpad).
 function setInputMode(mode) {
+  if (mode === 'kbd' && !G.touch) mode = 'mouse';
+  if (mode === G.inputMode) return;
+  const was = G.inputMode; G.inputMode = mode;
   const touch = mode === 'touch' && !!G.touch;
-  if (touch === G.touchMode) return;
   G.touchMode = touch;
   document.body.classList.toggle('touch', touch);
-  if (G.touch) { G.touch.show(touch); if (!touch) G.touch.reset(); }
+  document.body.classList.toggle('kbdtab', mode === 'kbd');
+  if (G.touch) { G.touch.show(touch || mode === 'kbd'); G.touch.hybrid(mode === 'kbd'); if (!touch) G.touch.reset(); }
   if (touch) G.ctl.releaseLock();
-  else G.hud.toast('Keyboard & mouse detected: click the view to lock the pointer (Esc releases it)', '');
+  else if (mode === 'kbd') G.hud.toast('Keyboard detected: WASD to move, E use, drag the screen to look, ` (backtick) or Esc for the menu', '');
+  else if (was !== undefined) G.hud.toast('Keyboard & mouse detected: click the view to lock the pointer (Esc or ` releases it)', '');
 }
 function panelCtx() {
   return {
@@ -297,9 +329,12 @@ function rideLift(deck) {
   G.lifting = true;
   G.sfx.play('lift');
   $('#fade').classList.add('on');
-  const ring = deck === RING_DECK || G.ctl.deck === RING_DECK;
+  const ring = deck === RING_DECK || G.ctl.deck === RING_DECK || deck === 7 || G.ctl.deck === 7;
+  if (deck === 7 && G.S.nav.state !== 'docked') { G.lifting = false; $('#fade').classList.remove('on'); return; }
   setTimeout(() => {
-    if (deck === RING_DECK) { // climb a spoke ladder from the hub down to the ring floor
+    if (deck === 7) { // up the docking tunnel onto the station concourse
+      G.ctl.deck = 7; G.ctl.x = (Math.random() - 0.5) * 1.2; G.ctl.z = 14 - 2.4; G.ctl.y = 0; G.ctl.yaw = 0; G.ctl.pitch = 0;
+    } else if (deck === RING_DECK) { // climb a spoke ladder from the hub down to the ring floor
       const C = 2 * Math.PI * RING.R, a = RING.spokes[Math.floor(Math.random() * RING.spokes.length)];
       G.ctl.deck = RING_DECK; G.ctl.x = (Math.random() - 0.5) * 0.8; G.ctl.z = (a / 360) * C + 1.6; G.ctl.y = 0.2; G.ctl.yaw = Math.PI; G.ctl.pitch = 0;
     } else {
@@ -308,7 +343,7 @@ function rideLift(deck) {
     }
     G.ctl.vx = G.ctl.vy = G.ctl.vz = 0;
     pushMyPos(true);
-    setTimeout(() => { $('#fade').classList.remove('on'); G.lifting = false; logLocal(deck === RING_DECK ? `CENTRIFUGE RING — ${(G.S.ring.g).toFixed(2)} g spin gravity` : `${DECKS[deck].full}`, 'info'); }, 250);
+    setTimeout(() => { $('#fade').classList.remove('on'); G.lifting = false; logLocal(deck === RING_DECK ? `CENTRIFUGE RING — ${(G.S.ring.g).toFixed(2)} g spin gravity` : deck === 7 ? `${WAYPOINTS[G.S.nav.leg].name.toUpperCase()} — station concourse` : `${DECKS[deck].full}`, 'info'); }, 250);
   }, ring ? 1400 : 650);
 }
 
@@ -397,6 +432,9 @@ function handleInteraction(dt) {
       else if (f.kind === 'item') act('item.pickup', { id: f.id });
       else if (f.kind === 'spoke') rideLift(3);
       else if (f.kind === 'bay') openPanel('science', f.id);
+      else if (f.kind === 'npc') openPanel('npc', f.id);
+      else if (f.kind === 'stationexit') rideLift(4);
+      else if (f.kind === 'kiosk') openPanel('nav', 'navcomp');
       else if (f.kind === 'bunk') act('sleep', { bunk: f.id });
       else if (f.kind === 'pod') act('pod.board');
       else if (f.kind === 'anchor') { G.ctl.clipTo(f.idx); G.sfx.click && G.sfx.click(0.6, 0, 2500); G.hud.toast(`Tether clipped to ${f.label.replace('Tether point (', '').replace(')', '')}`, 'good'); }
@@ -408,7 +446,7 @@ function handleInteraction(dt) {
   if (input.drop && me.pod) { input.drop = false; act('pod.exit'); }
   if (input.drop) {
     input.drop = false;
-    if (me.item && !blocked) { const fx = -Math.sin(G.ctl.yaw), fz = -Math.cos(G.ctl.yaw); act('item.drop', { x: G.ctl.x + fx * 0.8, z: G.ctl.z + fz * 0.8, y: G.ctl.fl ? G.ctl.y + 1.0 : 0 }); }
+    if (me.item && !blocked) { const fx = -Math.sin(G.ctl.yaw), fz = -Math.cos(G.ctl.yaw); const lv = G.ctl.lookVec(); act('item.drop', { x: G.ctl.x + fx * 0.8, z: G.ctl.z + fz * 0.8, y: G.ctl.y + 1.1, vx: (G.ctl.vx || 0) + lv[0] * 0.5, vy: (G.ctl.fl ? (G.ctl.vy || 0) + lv[1] * 0.5 : 0), vz: (G.ctl.vz || 0) + lv[2] * 0.5 }); }
   }
   G.workT -= dt;
   if (!blocked && f && (input.repair || input.item) && G.workT <= 0) {
@@ -432,7 +470,7 @@ function handleInteraction(dt) {
   } else if (!blocked && !f && input.item && me.item && me.item.type === 'medkit' && G.workT <= 0) { G.workT = 0.5; act('work', { kind: 'medkit', target: null }); input.item = false; }
   if (G.touch) {
     G.touch.setLabels({
-      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : f.kind === 'bunk' ? 'SLEEP' : f.kind === 'pod' ? 'BOARD' : f.kind === 'anchor' ? 'CLIP ON' : 'USE') : (me.pod ? 'EXIT POD' : G.panel.open ? 'CLOSE' : ''),
+      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : f.kind === 'bunk' ? 'SLEEP' : f.kind === 'pod' ? 'BOARD' : f.kind === 'anchor' ? 'CLIP ON' : f.kind === 'npc' ? 'TALK' : f.kind === 'stationexit' ? 'TO SHIP' : 'USE') : (me.pod ? 'EXIT POD' : G.panel.open ? 'CLOSE' : ''),
       repair: f && f.kind === 'comp' && S.comps[f.id].hp < 100 ? 'REPAIR' : '',
       item: me.pod ? (podState(S).carry ? 'RELEASE' : 'GRAB') : me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : me.item.type === 'tablet' ? 'TABLET' : 'REPAIR') : '',
       drop: me.item ? 'DROP' : '',
@@ -470,6 +508,8 @@ function handleFx(list) {
 let last = 0;
 function frame(tms) {
   requestAnimationFrame(frame);
+  if (G.fpsCap && G.lastFrameT && tms - G.lastFrameT < 1000 / G.fpsCap - 2) return; // frame-rate cap (battery saver)
+  { const ft = tms - (G.lastFrameT || tms); G.lastFrameT = tms; G.fpsAvg = (G.fpsAvg || 60) * 0.95 + (ft > 0 ? 1000 / ft : 60) * 0.05; const fm = document.getElementById('fpsmeter'); if (fm && fm.style.display !== 'none') fm.textContent = Math.round(G.fpsAvg) + ' fps'; }
   const now = tms / 1000;
   const rdt = Math.min(0.25, last ? now - last : 0.016);
   const dt = Math.min(0.05, rdt);
@@ -568,6 +608,16 @@ function setupMenus() {
   $('#btn-lock').onclick = () => { toggleMenu(false); lockMouse(); };
   const ql = $('#opt-quality'); ql.value = prefs.quality || (G.touchMode ? 'medium' : 'high');
   ql.onchange = () => { prefs.quality = ql.value; savePrefs(); G.world.setQuality(ql.value); };
+  // advanced graphics: each control writes prefs.gfx and re-applies the quality preset with the overrides on top
+  prefs.gfx = prefs.gfx || {};
+  const gx = prefs.gfx, applyGfx = () => { G.world.gfx = gx; G.world.setQuality(prefs.quality || ql.value); G.fpsCap = +gx.fps || 0; $('#fpsmeter').style.display = gx.stats ? '' : 'none'; savePrefs(); };
+  const bindR = (id, k, def, fmt) => { const el = $(id), v = $(id + '-v'); el.value = gx[k] ?? def; v.textContent = fmt(+el.value); el.oninput = () => { gx[k] = +el.value; v.textContent = fmt(+el.value); applyGfx(); }; };
+  const bindC = (id, k, def) => { const el = $(id); el.checked = gx[k] ?? def; el.onchange = () => { gx[k] = el.checked; applyGfx(); }; };
+  const bindS = (id, k, def) => { const el = $(id); el.value = String(gx[k] ?? def); el.onchange = () => { gx[k] = el.value; applyGfx(); }; };
+  bindR('#gx-res', 'res', 1, (v) => Math.round(v * 100) + '%'); bindR('#gx-fov', 'fov', 72, (v) => v + '°'); bindR('#gx-exp', 'exp', 1.0, (v) => v.toFixed(2));
+  bindS('#gx-shadow', 'shadow', ql.value === 'low' ? '0' : ql.value === 'high' ? '2048' : ql.value === 'ultra' ? '4096' : '1024'); bindS('#gx-fps', 'fps', '0');
+  bindC('#gx-soft', 'soft', true); bindC('#gx-sunin', 'sunInside', true); bindC('#gx-bob', 'bob', true); bindC('#gx-shake', 'shake', true); bindC('#gx-stats', 'stats', false);
+  if (G.world) { G.world.gfx = gx; G.fpsCap = +gx.fps || 0; }
   const sens = $('#opt-sens'), inv = $('#opt-invert');
   sens.value = prefs.sens; $('#sens-val').textContent = prefs.sens.toFixed(1) + '×'; inv.checked = !!prefs.invertY;
   sens.oninput = () => { prefs.sens = +sens.value; $('#sens-val').textContent = prefs.sens.toFixed(1) + '×'; savePrefs(); };
@@ -650,7 +700,7 @@ function setupPractice() {
   const mods = Object.entries(MODULES).map(([mesh, m]) => ({ mesh, m, id: COMP_IDS.find((id) => COMPS[id].mesh === mesh) })).filter((x) => x.id);
   const modSel = $('#pr-mod'), faultSel = $('#pr-fault'), diffSel = $('#pr-diff');
   modSel.innerHTML = mods.map((x, i) => `<option value="${i}">${esc(x.m.name)}${COMPS[x.id].ext ? ' (exterior)' : ''}</option>`).join('');
-  diffSel.innerHTML = Object.entries(DIFFICULTY).map(([k, d]) => `<option value="${k}">${esc(d.name)}</option>`).join('');
+  diffSel.innerHTML = Object.entries(DIFFICULTY).filter(([k]) => k !== 'custom').map(([k, d]) => `<option value="${k}">${esc(d.name)}</option>`).join('');
   let pr = {};
   try { pr = JSON.parse(localStorage.getItem('wolfram-practice') || '{}'); } catch (e) { pr = {}; }
   if (pr.diff) diffSel.value = pr.diff;
@@ -711,7 +761,7 @@ function setupPractice() {
     $('#practice').style.display = 'none';
     if (G.practice.start(x.id)) { running = true; lastT = 0; requestAnimationFrame(loop); }
   };
-  addEventListener('keydown', (e) => { if (G.practice && G.practice.open && !G.S) { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase(); if (G.practice.key(k === 'esc' ? 'escape' : k)) e.preventDefault(); } });
+  addEventListener('keydown', (e) => { if (G.practice && G.practice.open && !G.S) { const k = normKey(e); if (G.practice.key(k)) e.preventDefault(); } });
 }
 
 // the pilot's log: Δv per leg against the ideal plan, burn accuracy, capture, rendezvous and docking contact

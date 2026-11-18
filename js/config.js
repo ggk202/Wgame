@@ -107,8 +107,9 @@ export const AIRLOCK = { deck: 1, a: 110 };            // inner airlock door on 
 // R = floor radius (m), W = corridor width (along the ship axis), H = ceiling height. Spin gravity g = w^2 R.
 export const RING_DECK = 6;
 export const RING = { R: 25.5, W: 6.4, H: 4.2, maxG: 0.5, spokes: [0, 120, 240], bays: 6 };
+export const STATION_DECK = 7; // the concourse of the station we are docked at
 export const atmoDeck = (d) => (d === RING_DECK ? 3 : d); // the ring shares the hub's (Habitation) atmosphere
-export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : d === RING_DECK ? 'Centrifuge ring' : (DECKS[d] ? DECKS[d].name : '?')); // lift gate faces south
+export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : d === RING_DECK ? 'Centrifuge ring' : d === STATION_DECK ? 'Station concourse' : (DECKS[d] ? DECKS[d].name : '?')); // lift gate faces south
 export const SHELTER = { deck: 3, a: 180, r: 7.0, rad: 2.1 }; // storm shelter zone (water-wall cubicle)
 
 export const ITEMS = {
@@ -160,7 +161,30 @@ export const DIFFICULTY = {
     autopilot: false, sas: 'none', autoPower: false, autoReactor: false, autoRadiators: false, autoFire: false, autoPDC: false,
     nanites: 0, naniteBreach: false, wear: 1.3, threat: 1.3, pods: 1, dmg: 1.2,
   },
+  custom: {
+    name: 'Custom', desc: 'Set every automation, assist and danger level yourself.',
+    autopilot: true, sas: 'full', autoPower: true, autoReactor: 'assist', autoRadiators: true, autoFire: false, autoPDC: true,
+    nanites: 0.8, naniteBreach: false, wear: 0.75, threat: 0.85, pods: 5, dmg: 0.85, style: 'spacer', fatigue: 0.7,
+  },
 };
+// the knobs a custom difficulty exposes (type, range, label)
+export const CUSTOM_DIFF = [
+  ['autopilot', 'bool', 'Autopilot (flies the burns)'],
+  ['sas', ['full', 'hold', 'none'], 'Attitude assist (SAS)'],
+  ['autoPower', 'bool', 'Automatic power load balancing'],
+  ['autoReactor', [['full', 'Full'], ['assist', 'Assist'], [false, 'Manual']], 'Reactor automation'],
+  ['autoRadiators', 'bool', 'Automatic radiators'],
+  ['autoFire', 'bool', 'Automatic fire suppression'],
+  ['autoPDC', 'bool', 'Point defence runs itself'],
+  ['nanites', [0, 2, 0.1], 'Nanite repair rate'],
+  ['naniteBreach', 'bool', 'Nanites seal small breaches'],
+  ['wear', [0.3, 2, 0.05], 'Component wear'],
+  ['dmg', [0.4, 2, 0.05], 'Damage taken'],
+  ['threat', [0.3, 2, 0.05], 'Threat level'],
+  ['pods', [0, 10, 1], 'Backup crew in cryo'],
+  ['fatigue', [0, 2, 0.05], 'Fatigue rate (0 = off)'],
+  ['style', [['recruit', 'Recruit'], ['spacer', 'Spacer'], ['veteran', 'Veteran'], ['newtonian', 'Newtonian']], 'Repairs, docking & thrust limits like'],
+];
 
 export const STORYTELLERS = {
   cassiopeia: { name: 'Cassiopeia', desc: 'Steady escalation with breathers after big threats.', interval: [70, 130], majorGap: 330, majorChance: 0.35, threat: 1.0,

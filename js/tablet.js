@@ -143,7 +143,7 @@ export class Tablet {
     if (this.ring) this.ring.rotation.z = S.ring ? S.ring.spin : 0;
     for (const id of ['radA', 'radB']) { const w = this[id]; if (w) w.scale.x = S.heat.radExt && S.comps[id].hp > 0 ? 1 : 0.15; }
     const cp = this.crewPts.geometry.attributes.position; let n = 0;
-    for (const p of Object.values(S.players)) { if (!p.connected || p.state === 'dead' || p.state === 'spectator' || n >= 10) continue; cp.setXYZ(n++, ...playerShipPos(p).toArray()); }
+    for (const p of Object.values(S.players)) { if (!p.connected || p.state === 'dead' || p.state === 'spectator' || p.deck === 7 || n >= 10) continue; cp.setXYZ(n++, ...playerShipPos(p).toArray()); }
     for (let i = n; i < 10; i++) cp.setXYZ(i, 0, 0, 9999);
     cp.needsUpdate = true; this.crewPts.material.size = blink ? 5 : 3;
     const bp = this.breachPts.geometry.attributes.position; let k = 0;
@@ -186,7 +186,7 @@ export class Tablet {
     }
     if (this.page === 'crew') {
       return head + Object.values(S.players).filter((p) => p.connected).map((p) => {
-        const where = p.state === 'dead' ? 'IN CRYO THAW' : p.pod ? 'WORK POD' : p.deck === EXT_DECK ? 'EVA' : p.deck === RING_DECK ? 'RING' : DECKS[p.deck].name.toUpperCase();
+        const where = p.state === 'dead' ? 'IN CRYO THAW' : p.pod ? 'WORK POD' : p.deck === EXT_DECK ? 'EVA' : p.deck === RING_DECK ? 'RING' : p.deck === 7 ? 'STATION' : DECKS[p.deck].name.toUpperCase();
         const st = p.state === 'downed' ? '<b class="r">DOWN</b>' : p.state === 'dead' ? '<b class="r">KIA</b>' : p.sleep ? '<b class="y">ASLEEP</b>' : p.seat ? `@${(COMPS[p.seat] ? COMPS[p.seat].name : p.seat).toUpperCase().slice(0, 12)}` : '';
         return `<div class="tb-row">${p.id === me.id ? '&gt;' : ' '}${p.name.toUpperCase().slice(0, 10).padEnd(10, ' ')} ${where}</div><div class="tb-sub">HP ${tbBar(p.hp / 100, 6)} FTG ${tbBar((p.fatigue || 0) / 100, 6)} ${p.suit ? 'SUIT ' : ''}${p.item ? ITEMS[p.item.type].short : ''} ${st}</div>`;
       }).join('') + `<div class="tb-dim">BACKUP CREW IN CRYO: ${S.pods}</div>`;

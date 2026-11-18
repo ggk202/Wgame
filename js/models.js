@@ -469,48 +469,99 @@ export function buildFire() {
 export function buildAvatar(color) {
   const g = new THREE.Group();
   const col = new THREE.Color(color);
-  const limb = (parent, r, len, m, x, y, z) => { const pivot = new THREE.Group(); pivot.position.set(x, y, z); const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 3, 8), m); mesh.position.y = -len / 2 - r * 0.6; pivot.add(mesh); parent.add(pivot); return pivot; };
+  const M_ = (geo, m, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, parent = g) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); o.castShadow = true; parent.add(o); return o; };
+  // a limb hangs from a pivot (hip or shoulder): upper segment, a joint, lower segment, then whatever goes at the end
+  const limb = (parent, r, len, m, x, y, z, joint) => {
+    const pivot = new THREE.Group(); pivot.position.set(x, y, z); parent.add(pivot);
+    const up = len * 0.52, lo = len * 0.48;
+    M_(new THREE.CapsuleGeometry(r, up, 4, 10), m, 0, -up / 2 - r * 0.4, 0, 0, 0, 0, pivot);
+    if (joint) M_(new THREE.SphereGeometry(r * 1.05, 10, 8), joint, 0, -up - r * 0.6, 0, 0, 0, 0, pivot);
+    M_(new THREE.CapsuleGeometry(r * 0.9, lo, 4, 10), m, 0, -up - lo / 2 - r * 1.2, 0, 0, 0, 0, pivot);
+    pivot.userData.end = -len - r * 1.4;
+    return pivot;
+  };
+  const lathe = (pts, m, y, sx = 1, sz = 1, parent) => { const o = M_(new THREE.LatheGeometry(pts.map(([r, h]) => new THREE.Vector2(r, h)), 20), m, 0, y, 0, 0, 0, 0, parent); o.scale.set(sx, 1, sz); return o; };
 
-  // casual: polo shirt in the player's colour, khaki trousers, dark shoes
+  // ---- casual: shipboard jumpsuit jacket in the player's colour, cargo trousers, deck shoes, headset ----
   const casual = new THREE.Group(); g.add(casual);
-  const polo = mat(col), khaki = mat(0xb9a57e), skin = mat(0xd9b08c), hair = mat(0x3a2a20), shoe = mat(PAL.dark);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.42, 3, 10), polo); torso.position.y = 1.2; torso.scale.set(1.15, 1, 0.8); casual.add(torso);
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.03, 5, 10), mat(col.clone().multiplyScalar(0.7))); collar.rotation.x = Math.PI / 2; collar.position.y = 1.5; casual.add(collar);
-  const patch = new THREE.Mesh(new THREE.CircleGeometry(0.06, 10), mat(PAL.blue)); patch.position.set(0.12, 1.36, 0.19); casual.add(patch);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), skin); head.position.y = 1.68; casual.add(head);
-  const hairM = new THREE.Mesh(new THREE.SphereGeometry(0.155, 12, 8, 0, Math.PI * 2, 0, 1.4), hair); hairM.position.y = 1.7; hairM.rotation.x = -0.25; casual.add(hairM);
-  const cLegL = limb(casual, 0.09, 0.62, khaki, -0.11, 0.92, 0), cLegR = limb(casual, 0.09, 0.62, khaki, 0.11, 0.92, 0);
-  for (const L of [cLegL, cLegR]) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.26), shoe); s.position.set(0, -0.86, 0.05); L.add(s); }
-  const cArmL = limb(casual, 0.065, 0.5, polo, -0.3, 1.42, 0), cArmR = limb(casual, 0.065, 0.5, polo, 0.3, 1.42, 0);
-  for (const A of [cArmL, cArmR]) { const h = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), skin); h.position.y = -0.68; A.add(h); }
+  const polo = mat(col, { roughness: 0.85 }), polo2 = mat(col.clone().multiplyScalar(0.72), { roughness: 0.85 }), khaki = mat(0x9b8c6c, { roughness: 0.9 }), skin = mat(0xd9b08c, { roughness: 0.65 }), hair = mat(0x3a2a20, { roughness: 0.9 }), shoe = mat(0x23262b, { roughness: 0.6 }), sole = mat(0x111111);
+  lathe([[0.001, 0], [0.17, 0.02], [0.2, 0.18], [0.215, 0.36], [0.24, 0.5], [0.22, 0.58], [0.12, 0.64], [0.06, 0.66]], polo, 0.9, 1.15, 0.78, casual);
+  M_(new THREE.BoxGeometry(0.006, 0.5, 0.01), polo2, 0, 1.19, 0.175, 0, 0, 0, casual);                       // zip
+  M_(new THREE.BoxGeometry(0.1, 0.08, 0.01), polo2, 0.12, 1.32, 0.17, 0, 0, 0, casual);                     // chest pocket
+  M_(new THREE.BoxGeometry(0.05, 0.07, 0.006), mat(0xf2f2f2), -0.12, 1.33, 0.178, 0, 0, 0, casual);         // ID badge
+  M_(new THREE.CircleGeometry(0.035, 14), mat(PAL.blue), 0.23, 1.38, 0.0, 0, Math.PI / 2, 0, casual);       // shoulder patch
+  M_(new THREE.TorusGeometry(0.075, 0.025, 6, 14), polo2, 0, 1.52, 0, Math.PI / 2, 0, 0, casual);           // collar
+  M_(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 18), mat(0x2a2c30), 0, 0.92, 0, 0, 0, 0, casual).scale.set(1.12, 1, 0.8); // belt
+  M_(new THREE.BoxGeometry(0.06, 0.04, 0.01), metal(0xc0c4c8), 0, 0.92, 0.155, 0, 0, 0, casual);
+  M_(new THREE.CylinderGeometry(0.055, 0.06, 0.08, 10), skin, 0, 1.56, 0, 0, 0, 0, casual);                 // neck
+  const head = M_(new THREE.SphereGeometry(0.13, 18, 14), skin, 0, 1.69, 0, 0, 0, 0, casual); head.scale.set(0.92, 1.1, 1);
+  M_(new THREE.SphereGeometry(0.136, 16, 10, 0, Math.PI * 2, 0, 1.25), hair, 0, 1.71, -0.01, -0.3, 0, 0, casual).scale.set(0.95, 1.1, 1.02);
+  for (const x of [-0.045, 0.045]) { M_(new THREE.SphereGeometry(0.016, 8, 6), mat(0x1b1410), x, 1.71, 0.118, 0, 0, 0, casual); M_(new THREE.BoxGeometry(0.04, 0.008, 0.01), hair, x, 1.738, 0.118, 0, 0, x > 0 ? -0.1 : 0.1, casual); }
+  M_(new THREE.ConeGeometry(0.018, 0.045, 6), skin, 0, 1.68, 0.135, Math.PI / 2, 0, 0, casual);             // nose
+  M_(new THREE.BoxGeometry(0.045, 0.006, 0.006), mat(0x8a4a3a), 0, 1.635, 0.12, 0, 0, 0, casual);         // mouth
+  for (const x of [-0.12, 0.12]) M_(new THREE.SphereGeometry(0.025, 8, 6), skin, x, 1.69, 0, 0, 0, 0, casual).scale.set(0.5, 1, 0.8);
+  // headset: band, ear cup, mic boom
+  M_(new THREE.TorusGeometry(0.135, 0.008, 6, 20, Math.PI), mat(0x1c1e22), 0, 1.71, 0, 0, Math.PI / 2, 0, casual);
+  M_(new THREE.CylinderGeometry(0.035, 0.035, 0.02, 12), mat(0x1c1e22), 0.13, 1.69, 0, 0, 0, Math.PI / 2, casual);
+  M_(new THREE.CylinderGeometry(0.004, 0.004, 0.12, 6), mat(0x1c1e22), 0.1, 1.65, 0.07, 0.9, 0, -0.4, casual);
+  const cLegL = limb(casual, 0.085, 0.66, khaki, -0.1, 0.9, 0), cLegR = limb(casual, 0.085, 0.66, khaki, 0.1, 0.9, 0);
+  for (const L of [cLegL, cLegR]) { M_(new THREE.BoxGeometry(0.05, 0.12, 0.1), khaki, -0.08 * Math.sign(L.position.x || 1) * -1, -0.32, 0.0, 0, 0, 0, L); M_(new THREE.BoxGeometry(0.11, 0.07, 0.24), shoe, 0, -L.position.y + 0.055, 0.05, 0, 0, 0, L); M_(new THREE.BoxGeometry(0.115, 0.02, 0.25), sole, 0, -L.position.y + 0.012, 0.05, 0, 0, 0, L); }
+  const cArmL = limb(casual, 0.058, 0.52, polo, -0.27, 1.42, 0, polo2), cArmR = limb(casual, 0.058, 0.52, polo, 0.27, 1.42, 0, polo2);
+  for (const A of [cArmL, cArmR]) { const e = A.userData.end; M_(new THREE.BoxGeometry(0.06, 0.08, 0.035), skin, 0, e + 0.02, 0, 0, 0, 0, A); for (let f = 0; f < 4; f++) M_(new THREE.CapsuleGeometry(0.008, 0.03, 2, 4), skin, -0.022 + f * 0.015, e - 0.04, 0, 0, 0, 0, A); M_(new THREE.CapsuleGeometry(0.009, 0.025, 2, 4), skin, 0.035 * Math.sign(A.position.x), e, 0.012, 0, 0, 0.6 * Math.sign(A.position.x), A); }
 
-  // EMU: white hard upper torso, life-support backpack, display & control module,
-  // gold sun visor, helmet lights, and colour-coded identification stripes on the legs
+  // ---- EMU-style suit: hard upper torso, bearings at shoulder/waist/wrist, PLSS with jet pack, bubble helmet ----
   const suit = new THREE.Group(); g.add(suit);
-  const sw = mat(0xf2f1ec), joint = mat(0xc8c6be), stripe = mat(col);
-  const hut = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.42, 3, 12), sw); hut.position.y = 1.2; hut.scale.set(1.15, 1, 0.9); suit.add(hut);
-  const plss = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.32), sw); plss.position.set(0, 1.25, -0.36); suit.add(plss);
-  const plssTop = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 0.26), mat(PAL.grey)); plssTop.position.set(0, 1.7, -0.36); suit.add(plssTop);
-  const dcm = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.14), mat(0x9aa1a9)); dcm.position.set(0, 1.0, 0.3); suit.add(dcm);
-  for (const [x, c] of [[-0.1, PAL.red], [0, PAL.blue], [0.1, 0xffffff]]) { const k = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.04, 8), mat(c)); k.rotation.x = Math.PI / 2; k.position.set(x, 1.0, 0.38); suit.add(k); }
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.09), mat(PAL.blue)); flag.position.set(-0.32, 1.46, 0.06); flag.rotation.y = -Math.PI / 2; suit.add(flag);
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 14), new THREE.MeshStandardMaterial({ color: 0xdfe6ee, transparent: true, opacity: 0.35, roughness: 0.05, metalness: 0.1 })); helmet.position.y = 1.72; suit.add(helmet);
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.255, 18, 12, -Math.PI * 0.42, Math.PI * 0.84, 0.35, 1.25), new THREE.MeshStandardMaterial({ color: 0xe0b040, emissive: 0x1a1004, roughness: 0.08, metalness: 1.0 }));
-  visor.position.y = 1.72; suit.add(visor);
-  const evvaShell = new THREE.Mesh(new THREE.SphereGeometry(0.265, 16, 10, 0, Math.PI * 2, 0, 0.75), sw); evvaShell.position.y = 1.72; suit.add(evvaShell);
-  for (const x of [-0.2, 0.2]) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.12), mat(PAL.grey)); l.position.set(x, 1.86, 0.1); suit.add(l); const e = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), emis(0xfff4d0)); e.position.set(x, 1.86, 0.165); suit.add(e); }
-  const neck = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.035, 6, 16), joint); neck.rotation.x = Math.PI / 2; neck.position.y = 1.5; suit.add(neck);
-  const sLegL = limb(suit, 0.13, 0.58, sw, -0.14, 0.92, 0), sLegR = limb(suit, 0.13, 0.58, sw, 0.14, 0.92, 0);
-  for (const L of [sLegL, sLegR]) {
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.142, 0.142, 0.08, 12), stripe); band.position.y = -0.25; L.add(band);
-    const knee = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 5, 12), joint); knee.rotation.x = Math.PI / 2; knee.position.y = -0.46; L.add(knee);
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.32), mat(0xe2e0d8)); boot.position.set(0, -0.86, 0.04); L.add(boot);
-  }
-  const sArmL = limb(suit, 0.1, 0.46, sw, -0.38, 1.42, 0), sArmR = limb(suit, 0.1, 0.46, sw, 0.38, 1.42, 0);
+  const sw = mat(0xf2f1ec, { roughness: 0.78 }), swd = mat(0xe2e0d8, { roughness: 0.85 }), joint = metal(0xa8adb3), stripe = mat(col), grey = mat(PAL.grey), dk = mat(0x2a2d31);
+  lathe([[0.001, 0], [0.22, 0.02], [0.25, 0.2], [0.29, 0.42], [0.31, 0.56], [0.25, 0.64], [0.16, 0.68], [0.15, 0.7]], sw, 0.92, 1.12, 0.92, suit);   // HUT
+  M_(new THREE.TorusGeometry(0.22, 0.03, 8, 20), joint, 0, 0.94, 0, Math.PI / 2, 0, 0, suit).scale.set(1.12, 0.92, 1); // waist bearing
+  lathe([[0.001, 0], [0.18, 0.02], [0.22, 0.14], [0.23, 0.26]], swd, 0.68, 1.1, 0.9, suit);                // lower torso / brief
+  // PLSS backpack with vents, antenna and the SAFER jet pack underneath
+  M_(new THREE.BoxGeometry(0.6, 0.74, 0.3), sw, 0, 1.28, -0.37, 0, 0, 0, suit);
+  for (let i = 0; i < 5; i++) M_(new THREE.BoxGeometry(0.4, 0.02, 0.01), dk, 0, 1.12 + i * 0.05, -0.525, 0, 0, 0, suit);
+  M_(new THREE.BoxGeometry(0.5, 0.12, 0.26), grey, 0, 1.71, -0.37, 0, 0, 0, suit);
+  M_(new THREE.CylinderGeometry(0.008, 0.008, 0.36, 6), grey, 0.24, 1.88, -0.42, 0, 0, 0, suit);
+  M_(new THREE.SphereGeometry(0.018, 8, 6), emis(0xff3030), 0.24, 2.06, -0.42, 0, 0, 0, suit).userData.blink = true;
+  M_(new THREE.BoxGeometry(0.62, 0.2, 0.34), mat(0xd8d4c8), 0, 0.86, -0.4, 0, 0, 0, suit);                // SAFER
+  for (const [x, y] of [[-0.28, 0.8], [0.28, 0.8], [-0.28, 0.93], [0.28, 0.93]]) M_(new THREE.CylinderGeometry(0.018, 0.026, 0.05, 8), dk, x, y, -0.58, Math.PI / 2, 0, 0, suit);
+  M_(new THREE.BoxGeometry(0.03, 0.12, 0.08), grey, 0.33, 0.86, -0.25, 0, 0, 0, suit);                     // hand controller
+  // display & control module, its knobs and umbilical hoses
+  M_(new THREE.BoxGeometry(0.34, 0.15, 0.14), grey, 0, 1.0, 0.31, 0, 0, 0, suit);
+  M_(new THREE.PlaneGeometry(0.12, 0.05), emis(0x7fe0ff, 0.6), -0.06, 1.04, 0.381, -0.5, 0, 0, suit);
+  for (const [x, c] of [[0.05, PAL.red], [0.1, PAL.blue], [0.15, 0xffffff]]) M_(new THREE.CylinderGeometry(0.022, 0.022, 0.035, 10), mat(c), x - 0.04, 0.98, 0.385, Math.PI / 2, 0, 0, suit);
+  for (const s of [-1, 1]) { const h = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(s * 0.14, 1.0, 0.36), new THREE.Vector3(s * 0.26, 1.08, 0.22), new THREE.Vector3(s * 0.3, 1.2, -0.05), new THREE.Vector3(s * 0.25, 1.28, -0.22)]), 12, 0.018, 6), dk); suit.add(h); }
+  M_(new THREE.PlaneGeometry(0.14, 0.09), mat(PAL.blue), -0.33, 1.46, 0.06, 0, -Math.PI / 2, 0, suit);     // shoulder flag patch
+  M_(new THREE.CircleGeometry(0.05, 16), mat(0x1d3f73), 0.17, 1.33, 0.27, -0.25, 0.3, 0, suit);            // mission patch
+  M_(new THREE.TorusGeometry(0.05, 0.008, 6, 16), mat(0xd2a948), 0.17, 1.33, 0.272, -0.25, 0.3, 0, suit);
+  M_(new THREE.BoxGeometry(0.12, 0.035, 0.005), stripe, -0.15, 1.36, 0.285, -0.25, -0.3, 0, suit);          // name-tag in your colour
+  // helmet: neck ring, bubble, EVVA shell with gold visor, lights and camera
+  M_(new THREE.TorusGeometry(0.17, 0.035, 8, 20), joint, 0, 1.6, 0, Math.PI / 2, 0, 0, suit);
+  M_(new THREE.SphereGeometry(0.235, 22, 16), new THREE.MeshStandardMaterial({ color: 0xdfe6ee, transparent: true, opacity: 0.3, roughness: 0.04, metalness: 0.1 }), 0, 1.76, 0.01, 0, 0, 0, suit);
+  M_(new THREE.SphereGeometry(0.252, 22, 14, -Math.PI * 0.42, Math.PI * 0.84, 0.38, 1.2), new THREE.MeshStandardMaterial({ color: 0xe0b040, emissive: 0x1a1004, roughness: 0.06, metalness: 1.0 }), 0, 1.76, 0.01, 0, 0, 0, suit);
+  M_(new THREE.SphereGeometry(0.262, 18, 10, 0, Math.PI * 2, 0, 0.72), sw, 0, 1.76, 0.01, 0, 0, 0, suit);
+  M_(new THREE.TorusGeometry(0.255, 0.012, 6, 24, Math.PI * 0.95), swd, 0, 1.76, 0.01, 1.2, 0, Math.PI * 0.02, suit);
+  for (const x of [-0.19, 0.19]) { M_(new THREE.BoxGeometry(0.07, 0.07, 0.12), grey, x, 1.9, 0.08, 0, 0, 0, suit); M_(new THREE.PlaneGeometry(0.05, 0.05), emis(0xfff4d0), x, 1.9, 0.141, 0, 0, 0, suit); }
+  M_(new THREE.CylinderGeometry(0.018, 0.018, 0.05, 10), dk, 0.19, 1.98, 0.08, Math.PI / 2, 0, 0, suit);
+  // arms: shoulder bearing, upper arm, elbow, lower arm, wrist bearing, glove with fingers and a wrist checklist
+  const sArmL = limb(suit, 0.095, 0.5, sw, -0.38, 1.44, 0, joint), sArmR = limb(suit, 0.095, 0.5, sw, 0.38, 1.44, 0, joint);
   for (const A of [sArmL, sArmR]) {
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.108, 0.108, 0.06, 10), stripe); band.position.y = -0.18; A.add(band);
-    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), mat(0xd8d4c8)); glove.position.y = -0.66; A.add(glove);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.025, 5, 12), joint); ring.rotation.x = Math.PI / 2; ring.position.y = -0.58; A.add(ring);
+    const e = A.userData.end, sg = Math.sign(A.position.x);
+    M_(new THREE.TorusGeometry(0.105, 0.025, 6, 14), joint, 0, 0.02, 0, Math.PI / 2, 0, 0, A);
+    M_(new THREE.CylinderGeometry(0.103, 0.103, 0.06, 12), stripe, 0, -0.18, 0, 0, 0, 0, A);
+    M_(new THREE.TorusGeometry(0.085, 0.022, 6, 14), joint, 0, e + 0.12, 0, Math.PI / 2, 0, 0, A);
+    M_(new THREE.BoxGeometry(0.1, 0.11, 0.05), mat(0xd8d4c8), 0, e + 0.03, 0, 0, 0, 0, A);
+    for (let f = 0; f < 4; f++) M_(new THREE.CapsuleGeometry(0.013, 0.04, 2, 4), mat(0xd8d4c8), -0.033 + f * 0.022, e - 0.05, 0, 0, 0, 0, A);
+    M_(new THREE.CapsuleGeometry(0.014, 0.035, 2, 4), mat(0xd8d4c8), sg * 0.055, e, 0.018, 0, 0, sg * 0.6, A);
+    M_(new THREE.BoxGeometry(0.09, 0.03, 0.07), grey, 0, e + 0.2, 0.06, 0, 0, 0, A);
+  }
+  // legs: thigh restraint, knee bearing, ankle ring, boot with sole and toe cap
+  const sLegL = limb(suit, 0.125, 0.6, sw, -0.14, 0.82, 0, joint), sLegR = limb(suit, 0.125, 0.6, sw, 0.14, 0.82, 0, joint);
+  for (const L of [sLegL, sLegR]) {
+    const e = L.userData.end;
+    M_(new THREE.CylinderGeometry(0.135, 0.135, 0.08, 14), stripe, 0, -0.2, 0, 0, 0, 0, L);
+    M_(new THREE.TorusGeometry(0.115, 0.026, 6, 14), joint, 0, -L.position.y + 0.2, 0, Math.PI / 2, 0, 0, L);
+    M_(new THREE.BoxGeometry(0.2, 0.15, 0.32), mat(0xe2e0d8), 0, -L.position.y + 0.11, 0.05, 0, 0, 0, L);
+    M_(new THREE.BoxGeometry(0.21, 0.035, 0.34), mat(0x3a3d42), 0, -L.position.y + 0.018, 0.05, 0, 0, 0, L);
+    M_(new THREE.SphereGeometry(0.1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xe2e0d8), 0, -L.position.y + 0.09, 0.2, Math.PI / 2, 0, 0, L).scale.set(1, 0.7, 0.75);
   }
   suit.visible = false;
   const item = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.32), mat(0xffffff)); item.position.set(0.36, 0.9, 0.3); g.add(item);

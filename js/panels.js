@@ -10,6 +10,8 @@ import { EVENTS } from './events.js';
 import { CAP, ORBIT, RV, rvSafe, capEff, strainLimits, safeG, sunBody, radiatorSunFactor, stormShield, streamExposure } from './flight.js';
 import { EXPERIMENTS, SCI_COST, sciConditions, UPG_TEXT, fmtLag, podState, POD_CRADLE } from './crew.js';
 import { pdcCanSee } from './hull.js';
+import { ROUTE_TYPES, routeOptions, routeCurve } from './routes.js';
+import { stationNpcs, questOffers } from './stationdata.js';
 import { projBodyDir } from './combat.js';
 import { bar, btn, cls, esc } from './ui.js';
 
@@ -37,6 +39,30 @@ function stopInfo(S) {
   const toward = N.v * Math.sign(rem || 1);
   const slack = Math.abs(rem) - stop;
   return { rem, stop, toward, slack, a };
+}
+
+function drawRouteMap(g, S, w, h) {
+  const N = S.nav, leg = N.leg, a = WAYPOINTS[leg].pos, b = WAYPOINTS[leg + 1].pos;
+  const opts = routeOptions(S, leg), curves = opts.map((id) => routeCurve(S, id, leg));
+  const xs = [0, ...curves.flat().map((p) => p[0])], ys = [0, ...curves.flat().map((p) => p[1])];
+  const minX = Math.min(...xs) - 0.3, maxX = Math.max(...xs) + 0.3, minY = Math.min(...ys) - 0.3, maxY = Math.max(...ys) + 0.3;
+  const sc = Math.min(w / (maxX - minX), h / (maxY - minY));
+  const P = (p) => [(p[0] - minX) * sc + (w - (maxX - minX) * sc) / 2, h - ((p[1] - minY) * sc + (h - (maxY - minY) * sc) / 2)];
+  g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#2a1404'; for (let i = 1; i < 12; i++) { g.beginPath(); g.moveTo((i * w) / 12, 0); g.lineTo((i * w) / 12, h); g.stroke(); }
+  const sun = P([0, 0]); if (sun[0] > -20 && sun[0] < w + 20) { g.fillStyle = '#ffe070'; g.beginPath(); g.arc(sun[0], sun[1], 7, 0, 7); g.fill(); }
+  // the asteroid belt band (2.2–3.2 AU) as dots
+  g.fillStyle = '#5a4630'; for (let i = 0; i < 260; i++) { const r = 2.2 + ((i * 37) % 100) / 100, t = i * 2.399; const q = P([Math.cos(t) * r, Math.sin(t) * r]); if (q[0] > 0 && q[0] < w && q[1] > 0 && q[1] < h) g.fillRect(q[0], q[1], 1.5, 1.5); }
+  opts.forEach((id, i) => {
+    const R = ROUTE_TYPES[id], [p0, pm, p1] = curves[i], sel = (N.route || 'direct') === id;
+    const A = P(p0), M = P(pm), B = P(p1), C = [2 * M[0] - (A[0] + B[0]) / 2, 2 * M[1] - (A[1] + B[1]) / 2];
+    g.strokeStyle = R.color; g.lineWidth = sel ? 3.5 : 1.5; g.setLineDash(sel ? [] : [6, 5]);
+    g.beginPath(); g.moveTo(A[0], A[1]); g.quadraticCurveTo(C[0], C[1], B[0], B[1]); g.stroke(); g.setLineDash([]);
+    // danger pips along the route
+    for (let k = 0; k < R.danger; k++) { const t = 0.3 + k * 0.13, x = (1 - t) * (1 - t) * A[0] + 2 * (1 - t) * t * C[0] + t * t * B[0], y = (1 - t) * (1 - t) * A[1] + 2 * (1 - t) * t * C[1] + t * t * B[1]; g.fillStyle = R.danger >= 3 ? '#ff5a3a' : '#ffd23f'; g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 4, y + 3); g.lineTo(x - 4, y + 3); g.fill(); }
+    g.fillStyle = R.color; g.font = (sel ? 'bold ' : '') + '11px monospace'; g.fillText(R.short, M[0] + 6, M[1] - 6);
+  });
+  for (const [p, nm] of [[a, WAYPOINTS[leg].name.split(',')[0]], [b, WAYPOINTS[leg + 1].name.split(',')[0]]]) { const q = P(p); g.fillStyle = '#ffc27a'; g.beginPath(); g.arc(q[0], q[1], 5, 0, 7); g.fill(); g.font = '12px monospace'; g.fillText(nm.toUpperCase(), q[0] + 8, q[1] + 4); }
 }
 
 // What the pilot needs right now: capture countdown, orbit trim, rendezvous profile, rocks, structure, burn advice
@@ -187,6 +213,17 @@ export const PANELS = {
   nav: {
     title: 'NAVIGATION',
     build(B) {
+      // route choice for the next leg, FTL-style: shown while docked, and as a reminder of the chosen route in flight
+      B.canvas(560, 250, drawRouteMap, (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1);
+      B.html((S) => {
+        const N = S.nav;
+        if (N.state !== 'docked' || N.leg >= WAYPOINTS.length - 1) { const R = ROUTE_TYPES[N.route] || ROUTE_TYPES.direct; return N.state === 'transit' ? `<div class="kv"><label>Route</label><b style="color:${R.color}">${R.name}</b> · danger ${'▲'.repeat(R.danger)}${'△'.repeat(4 - R.danger)}</div>` : ''; }
+        const opts = routeOptions(S, N.leg), dest = WAYPOINTS[N.leg + 1].name.split(',')[0];
+        return `<h4>Routes to ${dest}</h4>` + opts.map((id) => {
+          const R = ROUTE_TYPES[id], sel = (N.route || 'direct') === id;
+          return `<div class="route ${sel ? 'sel' : ''}" style="border-color:${R.color}"><div><b style="color:${R.color}">${R.name}</b> <i>· ${Math.round(R.len * 100)}% distance · danger ${'▲'.repeat(R.danger)}${'△'.repeat(4 - R.danger)}</i></div><div class="note">${esc(R.text)}</div>${sel ? '<b class="good">SELECTED</b>' : `<button class="btn" data-act="nav.route" data-args='{"id":"${id}"}'>Plot this route</button>`}</div>`;
+        }).join('');
+      });
       B.canvas(400, 230, (g, S, w, h) => {
         const pts = WAYPOINTS.map((p) => p.pos);
         const xs = [...pts.map((p) => p[0]), 0], ys = [...pts.map((p) => p[1]), 0];
@@ -584,6 +621,24 @@ export const PANELS = {
       B.note((S) => `Spinning the ring up or down pushes the opposite twist into the hull: SAS soaks it up with RCS. Under thrust the ring floor feels tilted toward the drive (now ${(Math.atan2(S.drive.g, Math.max(0.001, S.ring.g)) * 57.3).toFixed(0)}°). Experiments run in the twelve science bays along the ring: walk up to a rack and press E.`);
     },
   },
+  npc: {
+    title: 'STATION',
+    build(B, ctx, id) {
+      B.html((S) => {
+        const wid = WAYPOINTS[S.nav.leg].id, n = stationNpcs(wid).find((x) => x.id === id);
+        if (!n) return '';
+        let h = `<h4>${esc(n.name)} — ${esc(n.title)}</h4><div class="note">“${esc(n.line)}”</div><div class="kv"><label>Credits</label><b>${S.credits}</b></div>`;
+        if (n.shop) h += '<div class="grid2">' + n.shop.map((k) => { const v = STATION_PRICES[k]; return `<button class="btn" data-act="station.buy" data-args='{"item":"${k}"}' ${S.credits < v.cost ? 'disabled' : ''}>${v.name} <i>${v.cost}cr</i></button>`; }).join('') + '</div>';
+        if (n.role === 'quest') {
+          const offers = questOffers(S), act = (S.quests && S.quests.active) || [];
+          h += '<h4>Contracts for the next leg</h4>' + (offers.length ? offers.map((q) => { const taken = act.some((a) => a.id === q.id); return `<div class="route ${taken ? 'sel' : ''}"><b>${esc(q.title)}</b> <i>· ${q.reward} credits on arrival</i><div class="note">${esc(q.text)}</div>${taken ? '<b class="good">ACCEPTED</b>' : `<button class="btn" data-act="quest.accept" data-args='{"id":"${q.id}"}'>Take the job</button>`}</div>`; }).join('') : '<div class="note">Nothing more on the board. This is the end of the line.</div>');
+          if (act.length) h += `<div class="note">Active: ${act.map((q) => esc(q.title)).join(' · ')}</div>`;
+        }
+        if (n.role === 'ambient') h += '<div class="note">They nod and get on with their day.</div>';
+        return h;
+      });
+    },
+  },
   science: {
     title: 'SCIENCE BAY',
     build(B, ctx, bay) {
@@ -611,7 +666,7 @@ export const PANELS = {
   lift: {
     title: 'LIFT',
     build(B, ctx) {
-      B.html((S) => DECKS.slice().reverse().map((d) => `<button class="btn wide ${ctx.me().deck === d.id ? 'sel' : ''}" data-act="local.lift" data-args='{"deck":${d.id}}'>${d.full}${S.breaches.some((b) => b.deck === d.id) ? ' <i class="bad">BREACH</i>' : ''}${COMP_IDS.some((id) => !COMPS[id].ext && COMPS[id].deck === d.id && S.comps[id].fire > 0) ? ' <i class="bad">FIRE</i>' : ''}</button>` + (d.id === 3 ? `<button class="btn wide" data-act="local.lift" data-args='{"deck":${RING_DECK}}'>CENTRIFUGE RING — via the hub and a spoke ladder · ${S.ring.g.toFixed(2)} g</button>` : '')).join(''));
+      B.html((S) => (S.nav.state === 'docked' ? `<button class="btn wide green" data-act="local.lift" data-args='{"deck":7}'>STATION — ${esc(WAYPOINTS[S.nav.leg].name)} · up the docking tunnel</button>` : '') + DECKS.slice().reverse().map((d) => `<button class="btn wide ${ctx.me().deck === d.id ? 'sel' : ''}" data-act="local.lift" data-args='{"deck":${d.id}}'>${d.full}${S.breaches.some((b) => b.deck === d.id) ? ' <i class="bad">BREACH</i>' : ''}${COMP_IDS.some((id) => !COMPS[id].ext && COMPS[id].deck === d.id && S.comps[id].fire > 0) ? ' <i class="bad">FIRE</i>' : ''}</button>` + (d.id === 3 ? `<button class="btn wide" data-act="local.lift" data-args='{"deck":${RING_DECK}}'>CENTRIFUGE RING — via the hub and a spoke ladder · ${S.ring.g.toFixed(2)} g</button>` : '')).join(''));
       B.note((S) => (S.drive.g < 0.04 ? 'Zero-g: you can also float straight up or down the open trunk (Space / C, or the ▲ ▼ buttons).' : `Under ${S.drive.g.toFixed(2)} g the trunk is a ${(7 * 4).toFixed(0)} m drop. Ride the platform, or use the ladder.`));
     },
   },

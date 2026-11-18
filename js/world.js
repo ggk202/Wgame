@@ -5,7 +5,9 @@ import { DECKS, COMPS, COMP_IDS, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WA
 import { polar, compDeck } from './util.js';
 import { mat, textSprite, buildComp, buildFire, buildAvatar } from './models.js';
 import { buildPlanet } from './planet.js';
-import { buildStation } from './npc.js';
+import { buildStation, buildShip } from './npc.js';
+import { buildItemModel, heldItemModel } from './itemmodels.js';
+import { buildStationInterior, STATION_ORIGIN } from './stationview.js';
 import { buildDeckInterior, buildRingInterior, ringPlace, RING_CENTER } from './interior.js';
 import { buildShipExterior, buildExtComp, EXT_CAMS, flashTex } from './ship.js';
 import { SL } from './hull.js';
@@ -13,6 +15,7 @@ import { qrot, qconj } from './attitude.js';
 import { projBodyDir } from './combat.js';
 import { podState, POD_CRADLE } from './crew.js';
 import { ANCHORS } from './hull.js';
+import { sunInertial } from './flight.js';
 
 // ---- small craft and cargo outside the hull ----
 function buildWorkPod() {
@@ -206,10 +209,16 @@ export class World {
   }
   setQuality(q) {
     this.quality = q;
-    const r = this.renderer, dpr = window.devicePixelRatio || 1;
-    r.setPixelRatio(q === 'low' ? 1 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(dpr, 2));
-    r.shadowMap.enabled = q !== 'low';
-    const ms = q === 'high' ? 2048 : 1024;
+    const r = this.renderer, dpr = window.devicePixelRatio || 1, gx = this.gfx || {};
+    const base = q === 'low' ? 1 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(dpr, 2);
+    r.setPixelRatio(base * (gx.res || 1));
+    const sh = gx.shadow !== undefined ? +gx.shadow : q === 'low' ? 0 : q === 'ultra' ? 4096 : q === 'high' ? 2048 : 1024;
+    r.shadowMap.enabled = sh > 0;
+    r.shadowMap.type = gx.soft === false ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    if (gx.fov) { this.camera.fov = gx.fov; this.camera.updateProjectionMatrix(); }
+    if (gx.exp) r.toneMappingExposure = gx.exp;
+    q = sh > 0 ? q : 'low';
+    const ms = sh || 1024;
     for (const L of [this.sunlight, this.key]) { L.castShadow = q !== 'low'; L.shadow.mapSize.set(ms, ms); if (L.shadow.map) { L.shadow.map.dispose(); L.shadow.map = null; } }
     this.scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => (m.needsUpdate = true)); });
     this.resize();
@@ -345,6 +354,7 @@ export class World {
   spacePos(deck, x, y, z, out = new THREE.Vector3()) {
     if (deck === RING_DECK) { const th = -z / RING.R, rr = RING.R - y; return out.set(x, -rr * Math.cos(th), -rr * Math.sin(th)).add(RING_CENTER); }
     if (deck === EXT_DECK) return out.set(x, y, z).add(this.exterior.position);
+    if (deck === 7) return out.set(x, y, z).add(STATION_ORIGIN);
     return out.set(x, deck * DECK_H + y, z);
   }
   spaceQuat(deck, z, out = new THREE.Quaternion()) {
@@ -374,7 +384,7 @@ export class World {
     void nearTrunk;
     this.decks.forEach((g, i) => { g.visible = i === deck || (deck <= 4 && i <= 4); });
     const walking = ctl ? !ctl.fl : true;
-    const bob = me.moving && walking && (me.y || 0) < 0.05 ? Math.sin(now * 9) * 0.035 : 0;
+    const bob = me.moving && walking && (me.y || 0) < 0.05 && !(this.gfx && this.gfx.bob === false) ? Math.sin(now * 9) * 0.035 : 0;
     const crouch = me.state === 'downed' ? -1.2 : 0;
     const cam = this.camera;
     const yawPitch = new THREE.Quaternion().setFromEuler(new THREE.Euler(me.pitch, me.yaw, me.state === 'downed' ? 0.6 : 0, 'YXZ'));
@@ -385,6 +395,7 @@ export class World {
       this.ringTilt = (this.ringTilt || 0) + (tilt - (this.ringTilt || 0)) * Math.min(1, dt * 2);
       cam.quaternion.copy(this.spaceQuat(deck, me.z)).multiply(new THREE.Quaternion().setFromAxisAngle(ZAX, this.ringTilt)).multiply(yawPitch);
     } else cam.quaternion.copy(yawPitch);
+    if (this.gfx && this.gfx.shake === false) this.shake = 0;
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 2.5);
       const s = this.shake * 0.08;
@@ -405,9 +416,16 @@ export class World {
     }
     const cp = cam.position;
     const eva = deck === EXT_DECK, ring = deck === RING_DECK;
-    const baseY = deck <= 4 ? deck * DECK_H : cp.y;
+    // the station concourse we are docked at (built on first visit, one per port)
+    const sid = S.nav.state === 'docked' ? WAYPOINTS[S.nav.leg].id : null;
+    if (sid !== this.stationIntId) { if (this.stationInt) this.scene.remove(this.stationInt); this.stationInt = sid ? buildStationInterior(sid) : null; this.stationIntId = sid; if (this.stationInt) this.scene.add(this.stationInt); }
+    if (this.stationInt) { this.stationInt.visible = deck === 7; if (deck === 7) this.stationInt.userData.tick(now, cam.position); }
+    const baseY = deck <= 4 ? deck * DECK_H : deck === 7 ? STATION_ORIGIN.y + 1.4 : cp.y;
     this.key.position.set(0, baseY + ROOM_H - 0.15, 0); this.key.target.position.set(0, baseY, 0);
-    this.sunlight.position.set(cp.x - 70, cp.y + 80, cp.z + 45); this.sunlight.target.position.copy(cp);
+    // the Sun: a real direction in the inertial frame, so its light and shadows sweep round as the ship turns
+    { const sq = this.skyQuat(S, deck, me.z), sd = this.sunScene(S, sq), sc = this.sunlight.shadow.camera, ext = eva ? 70 : 22;
+      this.sunlight.position.copy(cp).addScaledVector(sd, 150); this.sunlight.target.position.copy(cp);
+      if (sc.right !== ext) { sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.updateProjectionMatrix(); } }
     if (ring) { const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.spaceQuat(deck, me.z)); this.point.position.copy(cp).addScaledVector(up, 1.6); this.point2.position.copy(cp).addScaledVector(up, 1.2).add(new THREE.Vector3(0, 0, 0).set(-Math.sin(me.yaw) * 4, 0, 0)); }
     else { this.point.position.set(0, baseY + ROOM_H - 0.4, 0); this.point2.position.set(cp.x - Math.sin(me.yaw) * 4, baseY + ROOM_H - 0.5, cp.z - Math.cos(me.yaw) * 4); }
     const red = S.alert === 'red', yel = S.alert === 'yellow';
@@ -420,8 +438,8 @@ export class World {
     this.key.color.copy(lc); this.key.intensity = eva || ring ? 0 : 55 * powerDim;
     this.hemi.intensity = eva ? 0.22 : (ring ? 0.9 : 0.75) * powerDim;
     this.scene.environmentIntensity = eva ? 0.35 : 0.6 * powerDim;
-    this.sunlight.intensity = eva ? 3.4 : 0;
-    this.camDeck = deck;
+    this.sunlight.intensity = eva ? 3.4 : (this.gfx && this.gfx.sunInside === false ? 0 : 2.2 * (S.nav.state === 'docked' ? 0.7 : 1)); // through the windows inside
+    this.camDeck = deck; this._camZ = me.z;
     this.placeSpaceFx(deck, S);
     this.updateExterior(S, now, dt);
     const lampCol = new THREE.Color(lc.r * 0.95 * powerDim, lc.g * 0.95 * powerDim, lc.b * 0.95 * powerDim);
@@ -449,7 +467,7 @@ export class World {
       if (pk) { this.planet = buildPlanet(pk); this.planet.scale.setScalar(pk === 'ganymede' ? 2600 : 1500); this.scene.add(this.planet); }
       if (pk === 'luna') { this.earth = buildPlanet('earth'); this.earth.scale.setScalar(260); this.scene.add(this.earth); }
     }
-    this.placeSky(cp, now, ring && S.ring ? S.ring.spin : null);
+    this.placeSky(cp, now, this.skyQuat(S, deck, me.z), S);
     this.updateStation(S, now);
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.5);
     this.battleFlash.material.opacity = this.flash;
@@ -498,26 +516,42 @@ export class World {
     this.updateItems(S, deck);
     this.updateAvatars(S, me, deck, dt, now);
     // EVA safety tether from the hatch to your harness
-    this.tether.visible = eva && !this.focus;
+    this.tether.visible = false; // the real tether (wrapping round the hull) is drawn in updateCraft
     if (this.tether.visible) {
       const a = this.spacePos(EXT_DECK, EXT.hatch.x + 0.3, EXT.hatch.y, EXT.hatch.z), b = cp.clone().add(new THREE.Vector3(0, -0.6, 0).applyQuaternion(cam.quaternion)).add(new THREE.Vector3(0.15, 0, 0).applyQuaternion(cam.quaternion));
       const mid = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, -Math.min(4, a.distanceTo(b) * 0.06), 0));
       const pts = []; for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push(new THREE.Vector3().copy(a).multiplyScalar((1 - t) * (1 - t)).addScaledVector(mid, 2 * t * (1 - t)).addScaledVector(b, t * t)); }
       this.tether.geometry.setFromPoints(pts);
     }
-    if (me.item && !this.focus) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
-    else this.hand.visible = false;
+    // the item in your hand, as its proper model
+    this.hand.visible = false;
+    if (!this.heldGroup) { this.heldGroup = new THREE.Group(); this.heldGroup.position.set(0.3, -0.36, -0.62); this.heldGroup.rotation.set(0.35, -0.5, 0.05); this.heldGroup.scale.setScalar(0.62); this.camera.add(this.heldGroup); }
+    const ht = me.item && !this.focus && !me.pod ? me.item.type : null;
+    if (ht !== this.heldType) { this.heldGroup.clear(); if (ht) { const hm = heldItemModel(ht); hm.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.renderOrder = 5; } }); this.heldGroup.add(hm); } this.heldType = ht; }
+    this.heldGroup.visible = !!ht;
+    if (ht) this.heldGroup.position.y = -0.36 + (me.moving ? Math.sin(now * 9) * 0.012 : 0);
   }
   // spin: inside the centrifuge the whole sky wheels past the windows (the ring's axis is x in the ring's space)
-  placeSky(cp, now, spin = null) {
-    const q = spin === null ? new THREE.Quaternion() : new THREE.Quaternion().setFromAxisAngle(XAX, -spin);
-    const off = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(q).add(cp);
-    const sunDir = new THREE.Vector3(-2600, 900, 1500).normalize().applyQuaternion(q);
-    if (this.planet) { this.planet.position.copy(off(-2600, -900, -2200)); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); }
-    if (this.earth) { this.earth.position.copy(off(1500, 600, -3600)); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); }
+  // Inertial (nav) frame → scene frame for the space the camera is in. The sky is fixed in the inertial frame, and the
+  // ship turns inside it: on EVA and on the hull cameras the scene is the ship's body frame, on the decks it is the
+  // deck frame, and in the ring the ring's spinning frame.
+  skyQuat(S, deck, z = 0) {
+    const qi = new THREE.Quaternion(...(S.att.q || [0, 0, 0, 1])).invert();
+    if (deck === EXT_DECK) return qi;
+    if (deck === 7) return new THREE.Quaternion();
+    if (deck === RING_DECK) return new THREE.Quaternion().setFromAxisAngle(XAX, -(S.ring ? S.ring.spin : 0)).multiply(this.qShipToRing).multiply(qi);
+    return this.qShipToDeck.clone().multiply(qi);
+  }
+  sunScene(S, q) { const d = S.att.sunDir || sunInertial(S).dir; return new THREE.Vector3(d[0], d[1], d[2]).normalize().applyQuaternion(q); }
+  placeSky(cp, now, q = new THREE.Quaternion(), S = null) {
+    const off = (x, y, z, r) => new THREE.Vector3(x, y, z).normalize().multiplyScalar(r).applyQuaternion(q).add(cp);
+    const sunDir = S ? this.sunScene(S, q) : new THREE.Vector3(-0.8, 0.28, 0.46).applyQuaternion(q);
+    const h = this.renderer ? this.renderer.getSize(new THREE.Vector2()).y : 800;
+    if (this.planet) { this.planet.position.copy(off(-0.62, -0.25, -0.74, 3500)); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); this.planet.userData.setRes && this.planet.userData.setRes(h); }
+    if (this.earth) { this.earth.position.copy(off(0.34, 0.14, -0.93, 3900)); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); this.earth.userData.setRes && this.earth.userData.setRes(h); }
     this.stars.position.copy(cp); this.stars.quaternion.copy(q);
-    this.sun.position.copy(off(-2600, 900, 1500));
-    this.dest.position.copy(off(0, 300, -3000));
+    this.sun.position.copy(cp).addScaledVector(sunDir, 3100);
+    this.dest.position.copy(off(0, 0.1, -1, 3000));
   }
   // Station visible from the hull and cameras during approach / docked (ship body frame; our port is at the bow)
   updateStation(S, now) {
@@ -570,6 +604,8 @@ export class World {
   static DECK_Z = [33, -38, -48, -72, -82];
   placeSpaceFx(deck, S, forExterior = false) {
     const f = this.spaceFx;
+    f.visible = forExterior || deck !== 7;
+    if (!forExterior && deck === 7) return;
     if (forExterior || deck === EXT_DECK) { f.position.copy(this.exterior.position); f.quaternion.identity(); return; }
     if (deck === RING_DECK) {
       f.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(XAX, -(S.ring ? S.ring.spin : 0))).multiply(this.qShipToRing);
@@ -661,6 +697,34 @@ export class World {
     }
     for (const id in this.torps) if (!seen.has(id)) { this.spaceFx.remove(this.torps[id].m); delete this.torps[id]; }
   }
+  // Ships you can see out of the windows: a Navy escort flying in formation, a trader or a crippled hauler on a
+  // parallel track, a courier drone, and the hostiles of an encounter on their bearings. All in the ship frame inside
+  // spaceFx, so they show from every deck window, the ring, the hull cameras and on EVA.
+  updateVisitors(S, now, dt) {
+    this.visitors = this.visitors || {};
+    const qi = new THREE.Quaternion(...(S.att.q || [0, 0, 0, 1])).invert(), want = {};
+    const E = S.effects;
+    if (S.nav.state === 'transit' && E.escortT > 0) want.escort = { type: 'navy', off: [-420, 70, -160], burn: S.drive.ignited };
+    if (E.visit) want.visit = { type: E.visit.type, off: E.visit.type === 'courier' ? [60, -25, -40] : [520, -90, 120], burn: E.visit.type !== 'hauler' && S.drive.ignited, tumble: E.visit.type === 'hauler' };
+    if (S.enc) for (const e of S.enc.enemies) if (!e.dead && !e.gone) want['e' + e.id] = { type: e.type, dir: e.dir, range: e.range, burn: true, enemy: true };
+    for (const k in this.visitors) if (!want[k] || this.visitors[k].userData.type !== want[k].type) { this.spaceFx.remove(this.visitors[k]); delete this.visitors[k]; }
+    for (const [k, w] of Object.entries(want)) {
+      let m = this.visitors[k];
+      if (!m) { m = this.visitors[k] = buildShip(w.type); m.userData.t0 = now; m.userData.type = w.type; this.spaceFx.add(m); }
+      if (w.enemy) { // on its bearing, compressed: 0.9–2.4 km out, nose toward us
+        const d = this.bodyDir(S, w.dir), dist = 900 + Math.min(1500, (w.range || 800) * 0.9);
+        m.position.copy(d).multiplyScalar(dist); m.lookAt(0, 0, 0); m.rotateY(Math.PI); m.rotateZ(Math.sin(now * 0.3 + k.length) * 0.15);
+      } else {
+        const off = new THREE.Vector3(...w.off).add(new THREE.Vector3(Math.sin(now * 0.07) * 18, Math.sin(now * 0.05) * 8, Math.cos(now * 0.06) * 12));
+        // ease in from far away when the visitor first shows up
+        const k2 = Math.min(1, (now - m.userData.t0) / 10); off.multiplyScalar(1 + (1 - k2) * (1 - k2) * 3);
+        m.position.copy(off.applyQuaternion(qi)); m.quaternion.copy(qi);
+        if (w.tumble) m.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(now * 0.02, now * 0.013, now * 0.031)));
+      }
+      for (const p of m.userData.plumes) { p.visible = !!w.burn; if (p.visible) p.scale.set(1, 1, 0.8 + 0.2 * Math.sin(now * 30)); }
+      m.traverse((o) => { if (o.userData.blink) o.visible = (now + o.position.x * 0.01) % 1.4 < 0.15; });
+    }
+  }
   // the work pod, its cradle, drifting cargo and the ghosts' scout drones (all in the ship frame, outside)
   updateCraft(S, now) {
     const ex = this.exterior, P = podState(S), meId = this._meId;
@@ -708,11 +772,23 @@ export class World {
     for (const p of Object.values(S.players)) { const pts = p.id === meId ? this._meTeth : p.deck === EXT_DECK && !p.pod ? p.teth : null; if (pts && pts.length > 1) lines.push([p.id, pts]); }
     for (const [id, pts] of lines) {
       tseen.add(id);
+      // a 22 mm braided line: one short cylinder per straight run, plus a knuckle at each wrap point
       let L = this.tethers[id];
-      if (!L) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(16 * 3), 3)); L = this.tethers[id] = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffd040 })); L.frustumCulled = false; ex.add(L); }
-      const a = L.geometry.attributes.position, n = Math.min(16, pts.length);
-      for (let i = 0; i < n; i++) a.setXYZ(i, pts[i][0], pts[i][1], pts[i][2]);
-      a.needsUpdate = true; L.geometry.setDrawRange(0, n); L.visible = true;
+      if (!L) {
+        L = this.tethers[id] = new THREE.Group(); ex.add(L);
+        const m = mat(0xf2c430, 0.65, 0.05), seg = new THREE.CylinderGeometry(0.022, 0.022, 1, 8, 1), knot = new THREE.SphereGeometry(0.04, 8, 6);
+        for (let i = 0; i < 16; i++) { const c = new THREE.Mesh(seg, m); c.castShadow = true; c.userData.seg = true; L.add(c); const k = new THREE.Mesh(knot, m); k.userData.knot = true; L.add(k); }
+      }
+      const n = Math.min(16, pts.length), up = new THREE.Vector3(0, 1, 0), A = new THREE.Vector3(), B = new THREE.Vector3(), D = new THREE.Vector3();
+      let si = 0, ki = 0;
+      for (const ch of L.children) ch.visible = false;
+      const segs = L.children.filter((c) => c.userData.seg), knots = L.children.filter((c) => c.userData.knot);
+      for (let i = 0; i + 1 < n; i++) {
+        A.set(pts[i][0], pts[i][1], pts[i][2]); B.set(pts[i + 1][0], pts[i + 1][1], pts[i + 1][2]); D.subVectors(B, A); const len = D.length(); if (len < 1e-3) continue;
+        const c = segs[si++]; c.visible = true; c.position.copy(A).addScaledVector(D, 0.5); c.scale.set(1, len, 1); c.quaternion.setFromUnitVectors(up, D.normalize());
+        if (i > 0) { const k = knots[ki++]; k.visible = true; k.position.copy(A); }
+      }
+      L.visible = true;
     }
     for (const id in this.tethers) if (!tseen.has(id)) this.tethers[id].visible = false;
   }
@@ -729,6 +805,7 @@ export class World {
     }
     this.updateThreats(S, dt, now);
     this.updateCraft(S, now);
+    this.updateVisitors(S, now, dt);
     // gatlings: each tracks its own target (a torpedo or drone it can see), spins up and fires tracer streams at it
     const W = S.weap || {}, fire = W.pdcFire || [0, 0, 0], tg = W.pdcTgt || [null, null, null];
     ['pdc1', 'pdc2', 'pdc3'].forEach((id, i) => {
@@ -820,12 +897,12 @@ export class World {
     const L = [this.point.intensity, this.point2.intensity, this.key.intensity, this.hemi.intensity, this.scene.environmentIntensity, this.sunlight.intensity];
     this.point.intensity = 0; this.point2.intensity = 0; this.key.intensity = 0; this.hemi.intensity = 0.22; this.scene.environmentIntensity = 0.35; this.sunlight.intensity = 3.4;
     const sp = this.sunlight.position.clone(), st = this.sunlight.target.position.clone();
-    this.sunlight.position.set(ex.position.x - 70, ex.position.y + 80, ex.position.z + 45 - 30); this.sunlight.target.position.set(ex.position.x, ex.position.y, ex.position.z - 30);
+    { const sd = this.sunScene(S, this.skyQuat(S, EXT_DECK)); this.sunlight.target.position.set(ex.position.x, ex.position.y, ex.position.z - 30); this.sunlight.position.copy(this.sunlight.target.position).addScaledVector(sd, 150); const sc = this.sunlight.shadow.camera; sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.updateProjectionMatrix(); }
     const tv = this.tether.visible; this.tether.visible = false;
     const hv = this.hand.visible; this.hand.visible = false;
     const fp = this.spaceFx.position.clone(), fq = this.spaceFx.quaternion.clone();
     this.placeSpaceFx(EXT_DECK, S, true);
-    this.placeSky(cam.position, now);
+    this.placeSky(cam.position, now, this.skyQuat(S, EXT_DECK), S);
     const r = this.renderer, size = r.getSize(new THREE.Vector2()), pr = r.getPixelRatio();
     const vw = Math.min(size.x, w / pr), vh = Math.min(size.y, h / pr);
     r.setScissorTest(true); r.setViewport(0, size.y - vh, vw, vh); r.setScissor(0, size.y - vh, vw, vh);
@@ -838,7 +915,7 @@ export class World {
     this.sunlight.position.copy(sp); this.sunlight.target.position.copy(st);
     this.tether.visible = tv; this.hand.visible = hv;
     this.spaceFx.position.copy(fp); this.spaceFx.quaternion.copy(fq);
-    this.placeSky(this.camera.position, now, this.camDeck === RING_DECK && S.ring ? S.ring.spin : null);
+    this.placeSky(this.camera.position, now, this.skyQuat(S, this.camDeck, this._camZ || 0), S);
     return C;
   }
 
@@ -875,14 +952,19 @@ export class World {
       seen.add(it.id);
       let m = this.itemMeshes[it.id];
       if (!m) {
-        m = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.45), mat(ITEMS[it.type].color));
-        const lab = textSprite(ITEMS[it.type].name, { width: 1.0, size: 26 }); lab.position.y = 0.55; m.add(lab);
+        m = new THREE.Group(); const model = buildItemModel(it.type); m.add(model); m.userData.model = model;
+        const lab = textSprite(ITEMS[it.type].name, { width: 0.5, size: 24 }); lab.position.y = 0.55; m.add(lab); m.userData.lab = lab;
         this.scene.add(m);
         this.itemMeshes[it.id] = m;
       }
-      this.spacePos(it.deck, it.x, (it.y || 0) + 0.15, it.z, m.position);
+      this.spacePos(it.deck, it.x, it.y || 0, it.z, m.position);
       this.spaceQuat(it.deck, it.z, m.quaternion);
-      m.visible = it.deck === deck;
+      // lying where it fell, or tumbling slowly in free fall
+      const md = m.userData.model, t = this._fnow || 0, h = (it.id.charCodeAt(1) || 1) * 0.37;
+      if (it.fl) md.rotation.set(t * 0.4 + h, t * 0.27 + h * 2, t * 0.33); else md.rotation.set(it.type === 'ext' || it.type === 'cartridge' ? Math.PI / 2 * (it.lay || 0) : 0, h, 0);
+      if (!it.fl && (it.type === 'ext' || it.type === 'cartridge') && it.lay) md.position.y = 0.08; else md.position.y = 0;
+      m.visible = it.deck === deck || (it.deck <= 4 && deck <= 4);
+      if (m.userData.lab) m.userData.lab.visible = it.deck === deck && this.camera.position.distanceTo(m.position) < 3.5;
     }
     for (const id in this.itemMeshes) if (!seen.has(id)) { this.scene.remove(this.itemMeshes[id]); delete this.itemMeshes[id]; }
   }
@@ -919,7 +1001,10 @@ export class World {
       if (floating) a.group.position.y += Math.sin(now * 1.3 + p.id.length) * 0.03;
       a.group.visible = (p.deck === deck || (p.deck <= 4 && deck <= 4)) && p.state !== 'dead' && p.state !== 'spectator' && !p.pod;
       a.setSuit(p.suit);
-      a.item.visible = !!p.item; if (p.item) a.item.material.color.setHex(ITEMS[p.item.type].color);
+      a.item.visible = false;
+      if (!a.holder) { a.holder = new THREE.Group(); a.holder.position.set(0.36, 0.78, 0.18); a.group.add(a.holder); }
+      const want = p.item ? p.item.type : null;
+      if (a.holderType !== want) { a.holder.clear(); if (want) a.holder.add(buildItemModel(want)); a.holderType = want; }
       if (p.sleep && p.state === 'alive') { a.group.rotateX(-Math.PI / 2); a.group.position.y += 0.5; }
       if (p.state === 'downed') { a.group.rotateX(-Math.PI / 2); a.label.material.color.setHex(Math.sin(now * 6) > 0 ? 0xff4040 : 0xffffff); }
       else a.label.material.color.setHex(0xffffff);

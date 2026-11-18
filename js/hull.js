@@ -1,7 +1,7 @@
 // Ship layout in the exterior (ship) frame and a signed-distance model of the hull for EVA collisions.
 // Frame: x = starboard, y = dorsal, z = aft (the bow points to -z, the drive to +z). Units: metres.
 // No three.js here, so the controller (and node tests) can use it.
-import { COMPS } from './config.js';
+import { COMPS, RING } from './config.js';
 
 export const SL = {
   R: 12.2,                         // pressure-module hull radius (the interior decks are 22 m drums)
@@ -49,8 +49,26 @@ const TANK_SPHERES = [[-6.9, 3.9], [6.9, 3.9], [-6.9, -3.9], [6.9, -3.9], [0, 7.
 const TANK_CYLS = [[-6.6, 0], [6.6, 0], [0, 6.6], [0, -6.6]].map(([x, y]) => [x, y, 2.8, 6, 22]);
 
 // Signed distance from a point to the hull (negative = inside structure).
+// the centrifuge arms turn with the ring: the client keeps this angle up to date (world.js) so the hull field, the
+// tether and EVA collisions see the arms where they are drawn
+export const RING_STATE = { spin: 0 };
+const SPOKE_R = [1.1, 1.1, 1.35];
+export function sdSpokes(x, y, z) {
+  const dz = z - SL.ringZ; if (Math.abs(dz) > 3) return 1e9;
+  const r0 = SL.ringR - SL.ringHR, a0 = SL.hubR + 0.3;
+  let d = 1e9;
+  for (let i = 0; i < 4; i++) {
+    const deg = i < 3 ? RING.spokes[i] : 60; // the fourth is the cable truss between the first two spokes
+    const a = (deg * Math.PI) / 180 + Math.PI / 2 + RING_STATE.spin, cx = Math.cos(a), cy = Math.sin(a);
+    const t = Math.max(a0, Math.min(r0, x * cx + y * cy));
+    const rad = i < 3 ? SPOKE_R[i] : 0.35;
+    d = Math.min(d, Math.hypot(x - cx * t, y - cy * t, dz) - rad);
+  }
+  return d;
+}
 export function hullSDF(x, y, z) {
   let d = 1e9;
+  d = Math.min(d, sdSpokes(x, y, z));
   d = Math.min(d, sdCylZ(x, y, z, 0, 0, SL.R, SL.cmd[0], SL.hab[1]));
   d = Math.min(d, sdCylZ(x, y, z, 0, 0, SL.R, SL.eng[0], SL.cargo[1]));
   d = Math.min(d, sdConeZ(x, y, z, SL.capR0, SL.R, SL.cap[0], SL.cap[1]));
@@ -114,7 +132,7 @@ export function pdcCanSee(id, d) {
 }
 
 // ---------------- the spinning centrifuge ring, for collisions ----------------
-export function ringSDF(x, y, z) { return sdRing(x, y, z); }
+export function ringSDF(x, y, z) { return Math.min(sdRing(x, y, z), sdSpokes(x, y, z)); }
 
 // ---------------- tether attachment points ----------------
 // Hard points with clip rings all along the hull. Anchor 0 is the airlock hatch. A crew member's tether runs from the
@@ -150,6 +168,6 @@ export const tetherClear = (a, b) => !tetherSnag(a, b);
 // does the segment pass through the ring's swept volume?
 export function tetherInRing(a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz), n = Math.max(2, Math.ceil(L / 0.7));
-  for (let i = 0; i <= n; i++) { const t = i / n; const x = a.x + dx * t, y = a.y + dy * t, z = a.z + dz * t; if (sdRing(x, y, z) < 0.45) return { x, y, z }; }
+  for (let i = 0; i <= n; i++) { const t = i / n; const x = a.x + dx * t, y = a.y + dy * t, z = a.z + dz * t; if (sdRing(x, y, z) < 0.45 || sdSpokes(x, y, z) < 0.3) return { x, y, z }; }
   return null;
 }

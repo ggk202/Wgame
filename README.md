@@ -166,6 +166,14 @@ Difficulty changes the work:
 - **Veteran:** no highlights, and mixed fastener sizes.
 - **Newtonian:** every screw and bolt can be a different size and drive, unmarked. The wrong bit chews a screw head, a bolt done out of star order pinches the gasket, and touching a live HV circuit shocks you.
 
+## Stations, routes and items
+
+- **Stations:** while docked, take the lift's STATION button to the concourse (0.38 g). Vendors sell parts, contractors offer quests (settled at the next dock), and lost & found items appear each leg.
+- **Routes:** the nav console offers Direct, Navy lane, Sun-grazer, Belt and Dark routes. They differ in length, danger and events, and carry perks: escort, heat, science, salvage and bounty.
+- **Items:** items are detailed models that fall under gravity, drift in zero-g and get left behind on the hull under thrust.
+- **The tether:** the tether is thicker and collides with the whole hull, including the spinning centrifuge spokes.
+- **Settings:** you can pick a custom difficulty, open advanced graphics (resolution, shadows, FOV, exposure, FPS cap and more) and use an iPad hardware keyboard: `` ` `` or § acts as Esc, and the touch look-pad stays active.
+
 ## Hard sci-fi rules
 
 * **Newtonian travel:** burn, coast, flip 180° and burn to stop, using the rocket equation and a reaction-mass budget. The ship's clock is time-compressed while cruising and drops to real time in combat.

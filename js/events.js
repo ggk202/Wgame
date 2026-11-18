@@ -178,6 +178,7 @@ export const EVENTS = {
   distress_call: {
     cat: 'opportunity', title: 'Distress call', tension: 0.05, can: (S) => isTransit(S) && !S.vote,
     fire(S) {
+      S.effects.visit = { type: 'hauler', t: 420, name: 'MV Anansi' };
       msg(S, 'MV Anansi (distress)', 'Mayday, mayday. Drive failure, life support on batteries, six souls aboard. Anyone in range, please respond.', 2);
       startVote(S, 'distress_call', 'Answer the distress call?', 'A crippled ore hauler is close to our track. Matching velocity costs reaction mass. It could also be a trap.',
         [{ id: 'help', label: 'Divert and assist (−90 t reaction mass)' }, { id: 'relay', label: 'Relay their position to the nearest station', default: true }]);
@@ -187,6 +188,7 @@ export const EVENTS = {
         S.mass.rmass = Math.max(0, S.mass.rmass - 90);
         if (chance(0.28)) { log(S, 'It was a trap! Pirates were hiding in the hauler\'s shadow!', 'bad'); startEncounter(S, 'pirates', 110 * S.settings.threat); }
         else {
+          S.qc = S.qc || {}; S.qc.rescue = (S.qc.rescue || 0) + 1;
           S.credits += 25; S.stores.board += 2; S.stores.seal += 2; S.stores.bearing += 1; S.stores.medkit += 2;
           msg(S, 'MV Anansi', 'We owe you our lives, Wolfram. Take these spares, and the Belt Mutual reward is on its way to your account.', 2);
           log(S, 'Rescue complete: +25 credits, +3 spare kits, +2 medkits', 'good');
@@ -197,6 +199,7 @@ export const EVENTS = {
   trader: {
     cat: 'opportunity', title: 'Passing trader', tension: 0.02, can: (S) => !S.vote && !S.enc,
     fire(S) {
+      S.effects.visit = { type: 'freighter', t: 300, name: 'Pelican' };
       msg(S, 'Indie trader “Pelican”', 'Wolfram! We\'re on a near-parallel track. Want to do some business by drone?', 1);
       const opts = [];
       if (S.credits >= 10) opts.push({ id: 'spares', label: 'Buy a parts crate: cards, cells, bearings, seals (10 credits)' });
@@ -229,6 +232,7 @@ export const EVENTS = {
     cat: 'opportunity', title: 'Supply courier', tension: 0, can: isTransit,
     fire(S) {
       S.stores.wire += 3; S.stores.filler += 3; S.stores.patch += 2; S.stores.medkit += 1;
+      S.effects.visit = { type: 'courier', t: 150, name: 'Courier' };
       msg(S, 'Mission Control', `A courier drone carrying supplies has matched velocity with you. Fly safe. (Sent ${lagText(lightLag(S))} ago.)`, lightLag(S));
       log(S, 'Supply courier docked: +2 spare kits, +2 hull patches, +1 medkit', 'good');
     },

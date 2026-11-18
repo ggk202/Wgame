@@ -11,6 +11,9 @@ import { beginRendezvous, ORBIT } from './flight.js';
 import { BUNKS, bunkPos, BUNK_REACH, EXPERIMENTS, SCI_COST, BAY_IDS, replyHail, podState, POD, POD_CRADLE, deliverCargo, SCOUT } from './crew.js';
 import { EXT, AIRLOCK } from './config.js';
 import { ANCHORS } from './hull.js';
+import { ROUTE_TYPES, routeOptions } from './routes.js';
+import { STATION_DECK } from './config.js';
+import { vendorFor, acceptQuest, nearNpc, stationId } from './stationdata.js';
 
 const toast = (S, p, text) => fx(S, 'toast', { to: p.id, text });
 const dist2 = (p, x, z, y = 0) => Math.hypot(p.x - x, p.z - z, Math.max(0, Math.abs((p.y || 0) - y) - 1.2));
@@ -128,8 +131,9 @@ export function applyAction(S, pid, a, args = {}) {
     // ----- items -----
     case 'item.drop':
       if (!p.item) return;
-      { const big = p.deck === EXT_DECK || p.deck === RING_DECK ? 400 : ROOM_R;
-        S.items.push({ id: 'i' + Math.random().toString(36).slice(2, 8), type: p.item.type, charge: p.item.charge, deck: p.deck, x: clamp(+args.x || p.x, -big, big), y: clamp(+args.y || 0, -60, 60), z: clamp(+args.z || p.z, -big, big) }); }
+      { const big = p.deck === EXT_DECK || p.deck === RING_DECK ? 400 : p.deck === STATION_DECK ? 20 : ROOM_R;
+        const v = (k) => clamp(+args[k] || 0, -3, 3);
+        S.items.push({ id: 'i' + Math.random().toString(36).slice(2, 8), type: p.item.type, charge: p.item.charge, deck: p.deck, x: clamp(+args.x || p.x, -big, big), y: clamp(+args.y || 0, -60, 60), z: clamp(+args.z || p.z, -big, big), vx: v('vx'), vy: v('vy'), vz: v('vz') }); }
       p.item = null; return;
     case 'item.pickup': {
       const it = S.items.find((i) => i.id === args.id);
@@ -207,6 +211,16 @@ export function applyAction(S, pid, a, args = {}) {
       if (!S.settings.autopilot) return err('No autopilot at this difficulty');
       if (eff(S, 'navcomp') <= 0) return err('Navigation computer offline');
       N.autopilot = !!args.on; log(S, `Autopilot ${N.autopilot ? 'ENGAGED' : 'disengaged'}`, 'info'); return;
+    case 'quest.accept': {
+      if (S.nav.state !== 'docked' || p.deck !== STATION_DECK || !nearNpc(p, stationId(S), 'fixer', 5)) return err('Talk to the fixer at the bar');
+      const q = acceptQuest(S, args.id); if (!q) return err('Already taken');
+      log(S, `${p.name} took a contract: ${q.title} (${q.reward} credits on arrival)`, 'good'); return;
+    }
+    case 'nav.route': {
+      if (N.state !== 'docked' || (p.deck !== STATION_DECK && !at(S, p, ['navcomp', 'helm']))) return;
+      if (!routeOptions(S, N.leg).includes(args.id)) return;
+      N.route = args.id; log(S, `${p.name}: route for the next leg — ${ROUTE_TYPES[args.id].name}`, 'info'); return;
+    }
     case 'helm.manual':
       if (!at(S, p, ['helm', 'navcomp'])) return;
       N.manual = !!args.on; if (N.manual) N.autopilot = false;
@@ -412,7 +426,7 @@ function doWork(S, p, { kind, target }) {
 function stationBuy(S, p, item) {
   const N = S.nav;
   if (N.state !== 'docked') return toast(S, p, 'Only while docked');
-  if (!at(S, p, ['comms', 'helm'])) return;
+  if (!(p.deck === STATION_DECK && vendorFor(p, stationId(S), item)) && !at(S, p, ['comms', 'helm'])) return;
   const pr = STATION_PRICES[item];
   if (!pr) return;
   if (S.credits < pr.cost) return toast(S, p, 'Not enough credits');

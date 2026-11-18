@@ -390,3 +390,16 @@ body.touch #tut { top: calc(36px + env(safe-area-inset-top)); }
 #repair .rg-cam button { font: inherit; font-size: 16px; height: 34px; background: rgba(20, 8, 0, 0.75); color: #ffc27a; border: 1px solid #a8581a; cursor: pointer; padding: 0; }
 #repair .rg-cam button:hover { background: #ff8a1e; color: #140800; }
 #repair .rg-camhint { position: absolute; left: 10px; top: 10px; font-size: 11px; color: #a8581a; pointer-events: none; }
+.route { border-left: 4px solid; padding: 6px 10px; margin: 6px 0; background: rgba(255,138,30,0.04); }
+.route.sel { background: rgba(255,138,30,0.12); }
+.route i { font-style: normal; opacity: 0.8; font-size: 12px; }
+#custom-diff { margin: 6px 0 10px; padding: 8px 10px; border: 1px solid rgba(107,208,255,0.35); background: rgba(10,20,30,0.5); max-height: 260px; overflow-y: auto; }
+#custom-diff .cd-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0; font-size: 13px; }
+#custom-diff .cd-row span { flex: 1; }
+#custom-diff .cd-row input[type=range] { width: 120px; }
+#custom-diff .cd-row b { width: 34px; text-align: right; }
+#custom-diff select { font: inherit; background: #0b1520; color: #dfeefb; border: 1px solid #2e4a63; padding: 3px; }
+#fpsmeter { position: fixed; right: 8px; bottom: 6px; z-index: 40; font: 12px ui-monospace, monospace; color: #9dff7a; background: rgba(0,0,0,0.5); padding: 2px 6px; pointer-events: none; }
+#gfx-adv { margin: 6px 0; } #gfx-adv summary { cursor: pointer; padding: 6px 0; color: #9fc6e8; }
+#touchui.kbd #stick, #touchui.kbd #tbtns, #touchui.kbd #tvert { display: none !important; }
+#touchui.kbd #lookpad { left: 0 !important; width: 100% !important; }

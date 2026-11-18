@@ -51,6 +51,7 @@ export const closeoutTex = (rep) => ctex('closeout', 256, 256, (g, w, h) => {
 
 // ---------------- static batching: merge non-interactive meshes by material ----------------
 export function bakeStatic(root) {
+  if (globalThis.__noBake) return root; // debug: keep every part separate (used by the floating-parts audit)
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const buckets = new Map(), dead = [];

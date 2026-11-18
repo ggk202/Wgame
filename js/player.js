@@ -1,5 +1,7 @@
 // Local first-person controller, keyboard/mouse input and interaction targeting.
-import { ANCHORS, tetherSnag, tetherClear, tetherInRing, ringSDF } from './hull.js';
+import { ANCHORS, tetherSnag, tetherClear, tetherInRing, ringSDF, RING_STATE } from './hull.js';
+import { ST, ST_BOXES, ST_EXIT, stationNpcs } from './stationdata.js';
+import { STATION_DECK, WAYPOINTS } from './config.js';
 import { BUNKS, bunkPos, BUNK_REACH, podState, POD, POD_CRADLE, SCOUT } from './crew.js';
 import { COMPS, COMP_IDS, LOCKERS, LIFT_A, ROOM_R, ROOM_H, DECK_H, SHAFT_R, RAIL_H, EYE, PLAYER_H, ITEMS, DECKS, EXT_DECK, EXT, AIRLOCK, RING, RING_DECK, G0 } from './config.js';
 import { polar, compPos, compDeck, clamp } from './util.js';
@@ -12,9 +14,14 @@ export function gravityAt(S, deck) {
   const thrust = (S.drive ? S.drive.g : 0) * G0;
   if (deck === RING_DECK) return [thrust, -((S.ring && S.ring.g) || 0) * G0, 0];
   if (deck === EXT_DECK) return [0, 0, thrust];
+  if (deck === STATION_DECK) return [0, -ST.g * G0, 0];
   return [0, -thrust, 0];
 }
 
+// Key names differ between browsers: older iPadOS Safari reports arrows as 'UIKeyInputUpArrow' and Esc (Cmd-.) as
+// 'UIKeyInputEscape'. iPad keyboards often have no Esc key at all, so the backtick (and §) work as Esc too.
+const KEY_ALIASES = { uikeyinputuparrow: 'arrowup', uikeyinputdownarrow: 'arrowdown', uikeyinputleftarrow: 'arrowleft', uikeyinputrightarrow: 'arrowright', uikeyinputescape: 'escape', esc: 'escape', '`': 'escape', '§': 'escape', spacebar: ' ', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' };
+export function normKey(e) { const k = (e.key || '').toLowerCase(); return KEY_ALIASES[k] || (e.code === 'Space' ? ' ' : k); }
 // Shared input state, written by keyboard/mouse and touch controls.
 export const input = {
   fwd: 0, right: 0, up: 0, lookX: 0, lookY: 0, sprint: false,
@@ -68,16 +75,19 @@ export class Controller {
     window.addEventListener('keydown', (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
       hooks.keyboardSeen && hooks.keyboardSeen();
-      const k = e.key.toLowerCase();
-      if (k === 'tab') e.preventDefault();
+      const k = normKey(e);
+      // iPad: stop Space/arrows/Tab from scrolling the page or pressing a focused button
+      if (k === 'tab' || k === ' ' || k.startsWith('arrow')) e.preventDefault();
+      if (e.metaKey) return; // Cmd shortcuts belong to the OS (and iPadOS drops their key-ups)
       if (this.keys[k]) return;
       this.keys[k] = true;
       if (hooks.key(k, e)) return;
       if (k === 'e') input.use = true;
       if (k === 'g') input.drop = true;
     });
-    window.addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); this.keys[k] = false; hooks.keyUp && hooks.keyUp(k); });
+    window.addEventListener('keyup', (e) => { const k = normKey(e); this.keys[k] = false; if (k === 'meta') this.keys = {}; hooks.keyUp && hooks.keyUp(k); });
     window.addEventListener('blur', () => { this.keys = {}; });
+    document.addEventListener('visibilitychange', () => { this.keys = {}; });
   }
   requestLock() {
     const c = this.canvas;
@@ -112,6 +122,7 @@ export class Controller {
     this.yaw -= input.lookX * this.sens * prefs.sens;
     this.pitch = clamp(this.pitch - input.lookY * this.sens * prefs.sens * (prefs.invertY ? -1 : 1), -1.5, 1.5);
     input.lookX = 0; input.lookY = 0;
+    if (S && S.ring) RING_STATE.spin = S.ring.spin || 0;
     if (!me) { this.moving = false; return; }
     if (me.state === 'dead' || me.state === 'spectator') { // ghost jobs while waiting for the thaw
       const fwd = blocked ? 0 : input.fwd, right = blocked ? 0 : input.right, up = blocked ? 0 : input.up;
@@ -137,7 +148,7 @@ export class Controller {
     if (walk && this.tryLadder(fwd, right)) { this.ladderStep(dt, fwd, right, up); this.constrainDeck(true); return; }
     if (walk) this.walkStep(dt, S, me, fwd, right, G, gm);
     else this.floatStep(dt, S, me, fwd, right, up, G);
-    if (this.deck === RING_DECK) this.constrainRing(walk); else this.constrainDeck(walk);
+    if (this.deck === RING_DECK) this.constrainRing(walk); else if (this.deck === STATION_DECK) this.constrainStation(walk); else this.constrainDeck(walk);
   }
   spectate(dt, fwd, right, up) {
     const f = this.lookVec(), r = [Math.cos(this.yaw), 0, -Math.sin(this.yaw)], sp = 5;
@@ -268,6 +279,20 @@ export class Controller {
     }
     const lk = LOCKERS.find((l) => l.deck === this.deck);
     if (lk) { const lp = polar(lk.a, lk.r); push(lp.x, lp.z, 0.6); }
+  }
+  // the station concourse: a hall with counters and fittings to walk around
+  constrainStation(walk) {
+    const hw = ST.W / 2 - 0.4, hd = ST.D / 2 - 0.4, r = 0.35;
+    this.x = clamp(this.x, -hw, hw); this.z = clamp(this.z, -hd, hd);
+    for (const [x0, z0, x1, z1] of ST_BOXES) {
+      if (this.x > x0 - r && this.x < x1 + r && this.z > z0 - r && this.z < z1 + r) {
+        const dl = this.x - (x0 - r), dr = x1 + r - this.x, dn = this.z - (z0 - r), ds = z1 + r - this.z, m = Math.min(dl, dr, dn, ds);
+        if (m === dl) this.x = x0 - r; else if (m === dr) this.x = x1 + r; else if (m === dn) this.z = z0 - r; else this.z = z1 + r;
+      }
+    }
+    const eye = this.y + EYE, bottom = walk ? this.y : eye - 0.35, top = walk ? this.y + PLAYER_H : eye + 0.25;
+    if (bottom < 0) { if (this.vy < 0) this.land(-this.vy); this.y = walk ? 0 : 0.35 - EYE; this.vy = Math.max(0, this.vy); }
+    if (top > ST.H) { this.y -= top - ST.H; this.vy = Math.min(0, this.vy); }
   }
   constrainRing(walk) {
     const C = 2 * Math.PI * RING.R, hw = RING.W / 2 - 0.45;
@@ -427,6 +452,13 @@ export class Controller {
       if (compDeck(id) !== D) continue;
       const p = compPos(id);
       consider({ kind: 'comp', id, label: c.name }, p.x, (p.y || 0) + (c.ext ? 0.6 : 1.1), p.z, c.fp + (c.ext ? 2.6 : 2.3), c.ext ? 0.9 : 0.6);
+    }
+    if (D === STATION_DECK) {
+      const wid = WAYPOINTS[S.nav.leg].id;
+      consider({ kind: 'stationexit', id: 'exit', label: 'Docking tunnel back to the Wolfram' }, ST_EXIT.x, 1.6, ST_EXIT.z, 3.0, 1.2);
+      for (const n of stationNpcs(wid)) { let x = n.x, z = n.z; if (n.role === 'ambient') { const ph = (performance.now() / 1000) * 0.12 + (n.id === 'walker1' ? 0 : Math.PI), rx = n.id === 'walker1' ? 9 : 7, rz = n.id === 'walker1' ? 8 : 9; x = Math.cos(ph) * rx; z = Math.sin(ph) * rz; } consider({ kind: 'npc', id: n.id, label: `${n.name} — ${n.title}` }, x, 1.5, z, n.role === 'vendor' || n.role === 'quest' ? 3.6 : 2.4, 1.0); }
+      consider({ kind: 'kiosk', id: 'kiosk', label: 'Information kiosk' }, 0, 1.5, 0, 2.6, 1.0);
+      return best;
     }
     if (D === EXT_DECK) {
       const P = podState(S);

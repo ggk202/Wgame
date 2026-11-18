@@ -5,6 +5,10 @@ import { assignIssue } from './repair.js';
 import { updateCombat, updateWeapons, applyHit } from './combat.js';
 import { updateFlight, beginCapture, radiatorSunFactor, stormShield, safeG, pilotDock } from './flight.js';
 import { updateCrew, podState, spawnCargo } from './crew.js';
+import { ROUTE_TYPES, routeOf } from './routes.js';
+import { settleQuests, ST_ITEM_SPOTS } from './stationdata.js';
+import { STATION_DECK } from './config.js';
+const STATION_AIR = { o2: 21, n2: 79, co2: 0.04, temp: 21, rad: 0.0001 };
 import { storyStep, updateVote, updateEffects } from './story.js';
 import { updateAttitude, updateProx, startApproach, nose, sasModes, kick } from './attitude.js';
 import { legLength } from './state.js';
@@ -65,6 +69,13 @@ export function step(S, dt) {
   updateWeapons(S, dt);
   updateCombat(S, dt);
   updatePlayers(S, dt);
+  updateItems(S, dt);
+  // the concourse of the port we're docked at has a few things lying about in the lost & found
+  if (S.nav.state === 'docked' && S.stLeg !== S.nav.leg) {
+    S.stLeg = S.nav.leg;
+    S.items = S.items.filter((i) => i.deck !== STATION_DECK);
+    ST_ITEM_SPOTS.forEach(([x, z], i) => { if (i < 2 || Math.random() < 0.6) S.items.push({ id: 'st' + S.nav.leg + i, type: ['medkit', 'patch', 'cartridge', 'ext'][(S.nav.leg + i) % 4], charge: 100, deck: STATION_DECK, x, y: 0.9, z }); });
+  }
   updateCrew(S, dt, dtg, { igniteComp, heatCap: SHIP.heatCap });
   updateWorkshops(S, dt);
   storyStep(S, dt);
@@ -248,7 +259,7 @@ function updateHeat(S, dt) {
   for (const id of ['radA', 'radB']) {
     const c = S.comps[id];
     if (c.hp <= 0) continue;
-    out += (H.radExt ? SHIP.radExt : SHIP.radRet) * (0.3 + 0.7 * c.hp / 100) * (c.pw > 0 ? 1 : 0.6) * pumpF * (H.radExt ? radiatorSunFactor(S) : 1) * (S.upg && S.upg.radCoat ? 1.1 : 1);
+    out += (S.nav.state === 'transit' && routeOf(S).perks.includes('hot') ? 0.85 : 1) * (H.radExt ? SHIP.radExt : SHIP.radRet) * (0.3 + 0.7 * c.hp / 100) * (c.pw > 0 ? 1 : 0.6) * pumpF * (H.radExt ? radiatorSunFactor(S) : 1) * (S.upg && S.upg.radCoat ? 1.1 : 1);
   }
   H.inMW = inMW; H.outMW = out;
   H.stored = clamp(H.stored + (inMW - out) * dt, 0, SHIP.heatCap * 1.15);
@@ -340,7 +351,7 @@ function updateDrive(S, dt, dtg) {
   const m = massKg(S);
   const maxA = SHIP.thrust / m;
   // Recruit: the flight computer holds thrust inside the structural limits for you
-  const capG = S.settings.difficulty === 'recruit' ? safeG(S) * 0.95 : 99;
+  const capG = (S.settings.style || S.settings.difficulty) === 'recruit' ? safeG(S) * 0.95 : 99;
   D.capped = D.cmdG > capG;
   D.want = D.ignited ? clamp((Math.min(D.cmdG, capG) * G0) / maxA, 0, 1) : 0;
   if (D.locked > 0) { D.locked -= dt; D.want = D.lockedThr; if (D.locked <= 0) log(S, 'Throttle valve freed', 'good'); }
@@ -378,6 +389,14 @@ function updateDrive(S, dt, dtg) {
     if (N.dockT <= 0) {
       N.state = 'docked'; N.leg += 1; N.x = 0; N.v = 0;
       S.credits += 40;
+      { const R = routeOf(S); if (R.perks.includes('bounty')) { const b = 25 + 10 * N.leg; S.credits += b; log(S, `Dark-run cargo premium: +${b} credits, no questions asked.`, 'good'); } }
+      N.route = null; // pick the next route from the nav console
+      { // contracts from the last port settle on arrival
+        const L = S.pilot && S.pilot.legs.find((l) => l.leg === N.leg - 1);
+        for (const r of settleQuests(S, L && L.dock ? L.dock.v : null)) log(S, r.ok ? `Contract complete: ${r.q.title} (+${r.q.reward} credits)` : `Contract failed: ${r.q.title}`, r.ok ? 'good' : 'warn');
+      }
+      // the station concourse is open: a few things lying about in the lost & found
+      log(S, `The station concourse is open: take the trunk lift up to the docking tunnel (Lift → Station).`, 'info');
       S.mass.rmass = SHIP.rmassMax; S.mass.contam = 0; S.mass.pellets = Math.max(S.mass.pellets, SHIP.pellets);
       log(S, `Docked at ${WAYPOINTS[N.leg].name}. Contracted refuelling complete (reaction mass and pellets full). +40 credits — spend them at the Comms console.`, 'good');
       fx(S, 'chime');
@@ -388,12 +407,17 @@ function updateDrive(S, dt, dtg) {
 export function depart(S) {
   const N = S.nav;
   if (N.state !== 'docked' || N.leg >= WAYPOINTS.length - 1) return false;
-  N.state = 'transit'; N.x = 0; N.v = 0; N.L = legLength(N.leg);
+  const R = ROUTE_TYPES[N.route] || ROUTE_TYPES.direct; N.route = ROUTE_TYPES[N.route] ? N.route : 'direct';
+  // anyone still out on the station concourse hurries back aboard; the concourse's loose items stay behind
+  for (const p of Object.values(S.players)) if (p.deck === STATION_DECK) { Object.assign(p, { deck: 4, x: 0, z: 3.5, y: 0, tp: (p.tp || 0) + 1 }); log(S, `${p.name} runs back aboard before the hatch seals`, 'info'); }
+  S.items = S.items.filter((i) => i.deck !== STATION_DECK);
+  N.state = 'transit'; N.x = 0; N.v = 0; N.L = legLength(N.leg) * R.len;
+  if (R.perks.includes('escort')) { S.effects.escortT = 900; S.effects.escortRoute = true; }
   S.drive.cmdG = 0; S.drive.flip = 0;
   // undock: pushed off pointing back out along the departure axis; the next leg's target is ahead (-Z)
   S.att.q = [0, 0, 0, 1]; S.att.w = [0, 0, 0];
   if (S.att.mode === 'off' && sasModes(S).includes('hold')) S.att.mode = 'hold';
-  log(S, `Undocked from ${WAYPOINTS[N.leg].name}. Course laid in for ${WAYPOINTS[N.leg + 1].name}.`, 'info');
+  log(S, `Undocked from ${WAYPOINTS[N.leg].name}. Course laid in for ${WAYPOINTS[N.leg + 1].name} by the ${R.name.toLowerCase()}.${R.perks.includes('escort') ? ' A Navy frigate is taking station off our quarter.' : ''}`, 'info');
   S.story.nextAt = S.t + 60;
   return true;
 }
@@ -459,13 +483,40 @@ export function killPlayer(S, p, why) {
   log(S, `${p.name} has died${why ? ' — ' + why : ''}.`, 'bad');
   fx(S, 'death', { id: p.id });
 }
+// Loose items obey the local gravity: they fall and settle under thrust (or in the ring's spin), and drift, tumble
+// and bounce off the walls in free fall. Outside, thrust leaves them behind.
+function updateItems(S, dt) {
+  const thrust = S.drive.ignited ? S.drive.g * G0 : 0;
+  for (const it of S.items) {
+    it.vx = it.vx || 0; it.vy = it.vy || 0; it.vz = it.vz || 0; if (it.y === undefined) it.y = 0;
+    if (it.deck === EXT_DECK) { it.vz += thrust * dt; it.x += it.vx * dt; it.y += it.vy * dt; it.z += it.vz * dt; it.fl = true; if (it.z > 600) it.gone = true; continue; }
+    const g = it.deck === RING_DECK ? (S.ring ? S.ring.g * G0 : 0) : it.deck === STATION_DECK ? 0.38 * G0 : thrust;
+    if (g > 0.05) { // falls to the floor, bounces a little, slides to a stop
+      it.vy -= g * dt; it.y += it.vy * dt; it.x += it.vx * dt; it.z += it.vz * dt;
+      if (it.y <= 0) { it.y = 0; if (it.vy < -0.6) { it.vy = -it.vy * 0.25; } else { it.vy = 0; const f = Math.max(0, 1 - 3 * dt); it.vx *= f; it.vz *= f; } if (!it.lay && it.fl) it.lay = Math.random() < 0.6 ? 1 : 0; it.fl = Math.abs(it.vy) > 0.05; }
+      else it.fl = true;
+    } else { // weightless: keep drifting, very slight air drag
+      const f = Math.max(0, 1 - 0.02 * dt); it.vx *= f; it.vy *= f; it.vz *= f;
+      if (Math.abs(it.vx) + Math.abs(it.vy) + Math.abs(it.vz) < 0.02 && it.y < 0.05) { it.fl = false; continue; }
+      it.x += it.vx * dt; it.y += it.vy * dt; it.z += it.vz * dt; it.fl = true;
+      // the slightest air current lifts things off the floor
+      if (it.y < 0) { it.y = 0; it.vy = Math.abs(it.vy) * 0.5; }
+    }
+    if (it.deck === RING_DECK) { const hw = RING.W / 2 - 0.3; if (Math.abs(it.x) > hw) { it.x = Math.sign(it.x) * hw; it.vx *= -0.4; } if (it.y > RING.H - 0.4) { it.y = RING.H - 0.4; it.vy = -Math.abs(it.vy) * 0.4; } const C = 2 * Math.PI * RING.R; it.z = ((it.z % C) + C) % C; continue; }
+    if (it.deck === STATION_DECK) { it.x = Math.max(-18.6, Math.min(18.6, it.x)); it.z = Math.max(-13.6, Math.min(13.6, it.z)); if (it.y > 5.6) { it.y = 5.6; it.vy = -Math.abs(it.vy) * 0.4; } continue; }
+    const r = Math.hypot(it.x, it.z), lim = ROOM_R - 0.35;
+    if (r > lim) { const nx = it.x / r, nz = it.z / r, vn = it.vx * nx + it.vz * nz; it.x = nx * lim; it.z = nz * lim; if (vn > 0) { it.vx -= 1.5 * vn * nx; it.vz -= 1.5 * vn * nz; } }
+    if (it.y > 3.4) { it.y = 3.4; it.vy = -Math.abs(it.vy) * 0.4; }
+  }
+  if (S.items.some((i) => i.gone)) S.items = S.items.filter((i) => !i.gone);
+}
 function updatePlayers(S, dt) {
   const L = S.life;
   S.medActive = false;
   for (const p of Object.values(S.players)) {
     if (!p.connected) continue;
     if (p.state === 'alive') {
-      const d = S.decks[atmoDeck(p.deck)];
+      const d = p.deck === STATION_DECK ? STATION_AIR : S.decks[atmoDeck(p.deck)];
       const P = d.o2 + d.n2 + d.co2;
       let dmg = 0, cause = '';
       if (p.suit) {
