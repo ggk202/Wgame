@@ -125,16 +125,20 @@ function pdcIntercept(S, pr, base) {
   if (W.pdcMode === 'off') return false;
   const focused = W.focus.includes(pr.id);
   let pSurvive = 1, engaged = 0;
+  const src = S.enc && S.enc.enemies.find((e) => e.id === (pr.src || pr.id));
+  const dir = pr.dir || (src ? src.dir : null);
+  if (!W.pdcFire) W.pdcFire = [0, 0, 0];
   for (const id of PDCS) {
     const e = eff(S, id);
     if (e <= 0 || S.stores.pdcAmmo < 100) continue;
+    W.pdcFire[PDCS.indexOf(id)] = 1.4; // seconds of gatling fire (drives the barrel spin and tracers)
     const pk = W.pdcMode === 'auto' ? base : focused ? base * 1.6 : base * 0.3;
     pSurvive *= 1 - clamp(pk * e, 0, 0.95);
     S.stores.pdcAmmo = Math.max(0, S.stores.pdcAmmo - 120);
     S.heat.stored += 15;
     engaged++;
   }
-  if (engaged) fx(S, 'pdc');
+  if (engaged) fx(S, 'pdc', { dir, n: engaged });
   return engaged > 0 && !chance(pSurvive);
 }
 
@@ -142,6 +146,11 @@ export function updateWeapons(S, dt) {
   const W = S.weap, Sn = S.sensors;
   if (W.charging && W.rail < 1 && S.comps.railgun.pw > 0 && S.comps.railgun.hp > 0) W.rail = Math.min(1, W.rail + (dt / 12) * eff(S, 'railgun'));
   if (W.chaffT > 0) W.chaffT -= dt;
+  if (W.pdcFire) for (let i = 0; i < W.pdcFire.length; i++) W.pdcFire[i] = Math.max(0, W.pdcFire[i] - dt);
+  // missile launcher: the 8 cells reload themselves one at a time from the missile stock
+  if (W.cells === undefined) { W.cells = 8; W.cellT = 0; }
+  if (W.cells < 8 && S.stores.srm > 0 && eff(S, 'launcher') > 0) { W.cellT += dt * eff(S, 'launcher'); if (W.cellT >= 18) { W.cellT = 0; W.cells++; S.stores.srm--; } }
+  else W.cellT = 0;
   if (Sn.pingCd > 0) Sn.pingCd -= dt;
   if (Sn.pingT > 0) Sn.pingT -= dt;
   const E = S.enc;
@@ -222,6 +231,13 @@ export function updateCombat(S, dt) {
   // projectiles
   for (const pr of E.proj) {
     if (pr.type === 'missile') pr.speed += 0.5 * dt;
+    if (pr.type === 'srm') pr.speed += 2.5 * dt;
+    if (pr.from === 'us' && pr.type === 'srm' && !pr.pdcRolled && pr.range < 20) {
+      pr.pdcRolled = true;
+      const tgt = E.enemies.find((e) => e.id === pr.target);
+      const n = tgt ? ENEMY_TYPES[tgt.type].pdc : 0;
+      if (tgt && chance(1 - Math.pow(0.8, n))) { pr.done = true; log(S, `A Kestrel was shot down by ${tgt.name}'s PDCs`, 'warn'); continue; }
+    }
     pr.range -= pr.speed * dt;
     if (pr.from === 'them' && pr.type === 'missile' && !pr.pdcRolled && pr.range < 40) {
       pr.pdcRolled = true;
@@ -249,10 +265,10 @@ export function updateCombat(S, dt) {
         if (chance(pr.p)) {
           tgt.hp -= pr.dmg;
           fx(S, 'ehit', { id: tgt.id, w: pr.type });
-          log(S, `${pr.type === 'missile' ? 'Torpedo' : 'Railgun slug'} hit ${tgt.name}! (${Math.max(0, Math.round((tgt.hp / tgt.maxHp) * 100))}% integrity)`, 'good');
+          log(S, `${pr.type === 'missile' ? 'Torpedo' : pr.type === 'srm' ? 'Kestrel missile' : 'Railgun slug'} hit ${tgt.name}! (${Math.max(0, Math.round((tgt.hp / tgt.maxHp) * 100))}% integrity)`, 'good');
           fx(S, 'boom', { far: true });
           if (tgt.hp <= 0) { fx(S, 'edead', { id: tgt.id }); tgt.dead = true; S.stats.kills++; E.loot += ENEMY_TYPES[tgt.type].loot; log(S, `${tgt.name} destroyed!`, 'good'); }
-        } else log(S, `${pr.type === 'missile' ? 'Torpedo' : 'Slug'} missed ${tgt.name}`, 'warn');
+        } else log(S, `${pr.type === 'missile' ? 'Torpedo' : pr.type === 'srm' ? 'Kestrel' : 'Slug'} missed ${tgt.name}`, 'warn');
       }
     }
   }
@@ -299,6 +315,24 @@ export function launchTorpedo(S) {
   E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'us', target: tgt.id, range: tgt.range, speed: 10, dmg: 38, p, off: [rand(-1, 1), rand(-1, 1)] });
   log(S, `Torpedo away — target ${tgt.name}`, 'info');
   fx(S, 'launch');
+  return null;
+}
+// Kestrel short-range missiles: fast, light, fired in salvos from the dorsal 8-cell launcher
+export function launchSRM(S, n) {
+  const E = S.enc, W = S.weap, Sn = S.sensors;
+  if (!E) return 'No targets';
+  const tgt = E.enemies.find((e) => e.id === Sn.lock && !e.dead && !e.gone);
+  if (!tgt) return 'No target lock';
+  if (Sn.q < 0.2) return 'Lock quality too low (need 20%)';
+  if (eff(S, 'launcher') <= 0) return 'Missile launcher offline';
+  if (!W.cells) return 'All cells empty — reloading from stock';
+  n = clamp(n | 0, 1, W.cells);
+  const p = 0.86 * (1 - ENEMY_TYPES[tgt.type].evade * 0.3);
+  for (let i = 0; i < n; i++) E.proj.push({ id: 'p' + (++_pid), type: 'srm', from: 'us', target: tgt.id, range: tgt.range, speed: 22 + i * 0.4, dmg: 13, p, off: [rand(-1, 1), rand(-1, 1)] });
+  W.cells -= n;
+  S.heat.stored += 20 * n;
+  log(S, `Kestrel salvo away: ${n} missile${n > 1 ? 's' : ''} at ${tgt.name}`, 'info');
+  fx(S, 'srm', { n, dir: tgt.dir });
   return null;
 }
 export function deployChaff(S) {

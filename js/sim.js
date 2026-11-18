@@ -1,5 +1,5 @@
 // Host-authoritative ship simulation. step(S, dt) advances everything by dt real seconds.
-import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKERS, EXT_DECK, EXT, AIRLOCK, ROOM_R } from './config.js';
+import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKERS, EXT_DECK, EXT, AIRLOCK, ROOM_R, RING, RING_DECK, atmoDeck } from './config.js';
 import { clamp, rand, randn, chance, pick, polar, compPos, log, fx } from './util.js';
 import { updateCombat, updateWeapons } from './combat.js';
 import { storyStep, updateVote, updateEffects } from './story.js';
@@ -50,6 +50,7 @@ export function step(S, dt) {
   updatePower(S, dt);
   updateReactor(S, dt, dtg);
   updateHeat(S, dt);
+  updateRing(S, dt);
   if (S.nav.state === 'docked' || S.nav.state === 'docking') { S.att.w = [0, 0, 0]; } else updateAttitude(S, dt);
   updateDrive(S, dt, dtg);
   if (S.nav.state === 'approach') updateProx(S, dt, (r) => onCapture(S, r), (r, hard) => onCollide(S, r, hard));
@@ -122,6 +123,8 @@ export function demandOf(S, id) {
     case 'fabricator': d += S.fab.queue.length ? 5 : 0; break;
     case 'dronebay': d += 1.5 * S.drones.jobs.length; break;
     case 'magazine': d += S.weap.tubes.some((t) => t.load > 0) ? 2 : 0; break;
+    case 'centrifuge': d += S.ring ? (Math.abs(S.ring.target - S.ring.g) > 0.002 ? 2.4 : 0.2 + S.ring.g * 0.8) : 0; break;
+    case 'launcher': d += S.weap.cells < 8 && S.stores.srm > 0 ? 0.8 : 0; break;
     case 'drivecore': d = S.drive.ignited ? 2 + 14 * S.drive.want : 0.5; break;
     case 'railgun': d += S.weap.charging && S.weap.rail < 1 ? 20 : 0; break;
     case 'pdc1': case 'pdc2': case 'pdc3': d += S.enc ? 1 : 0; break;
@@ -437,7 +440,7 @@ function updatePlayers(S, dt) {
   for (const p of Object.values(S.players)) {
     if (!p.connected) continue;
     if (p.state === 'alive') {
-      const d = S.decks[p.deck];
+      const d = S.decks[atmoDeck(p.deck)];
       const P = d.o2 + d.n2 + d.co2;
       let dmg = 0, cause = '';
       if (p.suit) {
@@ -465,11 +468,11 @@ function updatePlayers(S, dt) {
       if (p.dose > 5) { dmg += (p.dose - 5) * 0.6; cause = 'radiation sickness'; }
       if (S.drive.g > 2.2 && !p.seat) { dmg += (S.drive.g - 2.2) * 3; cause = 'high-g trauma'; }
       if (p.deck === EXT_DECK && S.drive.g > EXT.maxG) {
-        // mag boots can't hold under thrust: the safety tether reels the crew member back into the airlock
+        // nobody can hang on to the hull under thrust: the safety tether's reel hauls the crew member back into the airlock
         const ap = airlockInside();
         Object.assign(p, { deck: AIRLOCK.deck, x: ap.x, z: ap.z, tp: p.tp + 1, seat: null });
         p.hp -= 25;
-        log(S, `${p.name} was torn off the hull by thrust and reeled in on the safety tether!`, 'bad');
+        log(S, `${p.name} was swept off the hull by thrust and reeled in on the safety tether!`, 'bad');
         fx(S, 'hit', { deck: AIRLOCK.deck, power: 0.4 });
       }
       if (L.food <= 0) { dmg += 0.15; cause = 'starvation'; }
@@ -562,4 +565,33 @@ function checkEnd(S, dt) {
     N.adriftT += dt;
     if (N.adriftT > 90) { S.phase = 'lost'; S.endReason = 'Out of reaction mass. The Wolfram drifts on a trajectory nobody can reach in time.'; }
   } else N.adriftT = 0;
+}
+
+// ---------- centrifuge ring ----------
+// The ring motor spins the ring up or down at a limited rate. Changing its spin pushes the opposite angular
+// momentum into the ship (roll), which SAS has to soak up with RCS. Bearings wear faster when spinning hard.
+export function ringOmega(g) { return Math.sqrt(Math.max(0, g) * G0 / RING.R); } // rad/s
+export function ringRpm(g) { return (ringOmega(g) * 60) / (2 * Math.PI); }
+function updateRing(S, dt) {
+  const R = S.ring;
+  if (!R) return;
+  const e = eff(S, 'centrifuge');
+  const want = R.brake ? 0 : clamp(R.target, 0, RING.maxG);
+  const rate = 0.0022 * (0.4 + 0.6 * e) * (1 - R.wear * 0.5); // g per second
+  const prev = R.g;
+  if (e > 0 && Math.abs(want - R.g) > 1e-4) R.g += clamp(want - R.g, -rate * dt * (R.brake ? 2 : 1), rate * dt);
+  else if (e <= 0 && R.g > 0) R.g = Math.max(0, R.g - 0.0004 * dt); // unpowered: bearing friction slowly bleeds spin
+  const dw = ringOmega(R.g) - ringOmega(prev);
+  if (dw !== 0 && S.nav.state !== 'docked' && S.nav.state !== 'docking') S.att.w[2] -= dw * 0.035; // reaction torque on the hull
+  R.spin = (R.spin + ringOmega(R.g) * dt) % (Math.PI * 2);
+  R.wear = clamp(R.wear + dt * R.g * 0.00002 * S.settings.wear, 0, 1);
+  if (R.wear > 0.9 && R.g > 0.05 && chance(dt * 0.002)) { S.comps.centrifuge.hp = Math.max(0, S.comps.centrifuge.hp - 15); log(S, 'Centrifuge bearing shudder! Ring drive damaged', 'bad'); }
+}
+// Apparent gravity at a crew member's position, in the local frame of the space they are in.
+// Decks: floors face the drive, so thrust is straight "down" (-y). Ring: spin is "down" (-y) and thrust pulls sideways (+x, aft).
+export function localGravity(S, deck) {
+  const thrust = S.drive.g * G0;
+  if (deck === RING_DECK) return [thrust, -(S.ring ? S.ring.g : 0) * G0, 0];
+  if (deck === EXT_DECK) return [0, 0, thrust];
+  return [0, -thrust, 0];
 }

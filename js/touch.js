@@ -19,6 +19,7 @@ export function setupTouch(root, hooks) {
       <button data-b="drop" class="tb small">DROP</button>
       <button data-b="sprint" class="tb small">RUN</button>
     </div>
+    <div id="tvert"><button data-b="up" class="tb small">▲ UP</button><button data-b="down" class="tb small">▼ DOWN</button></div>
     <div id="ttop">
       <button data-b="mouse" class="tb small">MOUSE</button>
       <button data-b="status" class="tb small">SHIP</button>
@@ -60,6 +61,8 @@ export function setupTouch(root, hooks) {
       else if (name === 'drop') input.drop = true;
       else if (name === 'repair') input.trepair = true;
       else if (name === 'item') input.titem = true;
+      else if (name === 'up') input.tup = 1;
+      else if (name === 'down') input.tup = -1;
       else if (name === 'sprint') { input.tsprint = !input.tsprint; b.classList.toggle('lit', input.tsprint); }
       else hooks.button(name);
       hooks.unlockAudio && hooks.unlockAudio();
@@ -68,11 +71,13 @@ export function setupTouch(root, hooks) {
       e.preventDefault(); b.classList.remove('on');
       if (name === 'repair') input.trepair = false;
       if (name === 'item') input.titem = false;
+      if (name === 'up' || name === 'down') input.tup = 0;
     }, { passive: false });
   }
   return {
     setLabels(l) { for (const [k, v] of Object.entries(l)) { const b = wrap.querySelector(`[data-b="${k}"]`); if (b) { b.textContent = v || k.toUpperCase(); b.classList.toggle('dim', !v); } } },
     show(v) { wrap.style.display = v ? '' : 'none'; },
-    reset() { input.tfwd = 0; input.tright = 0; input.trepair = false; input.titem = false; knob.style.transform = ''; },
+    setFloat(on) { wrap.querySelector('#tvert').style.display = on ? '' : 'none'; },
+    reset() { input.tfwd = 0; input.tright = 0; input.tup = 0; input.trepair = false; input.titem = false; knob.style.transform = ''; },
   };
 }

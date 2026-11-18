@@ -1,5 +1,5 @@
 // WOLFRAM — boot, lobby, game loop, networking glue.
-import { VERSION, DIFFICULTY, STORYTELLERS, LENGTHS, PLAYER_COLORS, COMPS, DECKS, LIFT_A, SHAFT_R, WAYPOINTS, EXT, EXT_DECK, AIRLOCK, ROOM_R } from './config.js';
+import { VERSION, DIFFICULTY, STORYTELLERS, LENGTHS, PLAYER_COLORS, COMPS, COMP_IDS, DECKS, LIFT_A, SHAFT_R, WAYPOINTS, EXT, EXT_DECK, AIRLOCK, ROOM_R, RING, RING_DECK } from './config.js';
 import { polar, fmtTime, clamp } from './util.js';
 import { createState, newPlayer, extDeck } from './state.js';
 import { step } from './sim.js';
@@ -24,7 +24,7 @@ const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { ret
 const G = {
   role: null, S: null, myId: null, net: null, code: '',
   ctl: new Controller(), world: null, hud: null, panel: null, panelKind: null, panelComp: null,
-  sfx: new Sfx(), touch: null, touchMode: false, ext: new ExtView(), pilotTouch: { r: [0, 0, 0], t: [0, 0, 0] }, pilotSent: '', pilotT: 0,
+  sfx: new Sfx(), touch: null, touchMode: false, ext: new ExtView(), cams: null, pilotTouch: { r: [0, 0, 0], t: [0, 0, 0] }, pilotSent: '', pilotT: 0,
   simAcc: 0, sendT: 0, posT: 0, hudT: 0, panelT: 0, workT: 0, saveT: 0, lastTp: 0,
   focus: null, menuOpen: false, chatOpen: false, ended: false, lifting: false, statusHeld: false,
 };
@@ -79,18 +79,49 @@ function initLobby() {
 }
 function lobbyMsg(t) { $('#lobby-msg').textContent = t; }
 
+// ---------------- external camera feeds (rendered by the main renderer, copied into a console canvas) ----------------
+class CamView {
+  constructor() {
+    this.cam = 0; this.t = 0;
+    this.wrap = document.createElement('div'); this.wrap.className = 'extview camview';
+    this.canvas = document.createElement('canvas'); this.canvas.width = 640; this.canvas.height = 360;
+    this.wrap.appendChild(this.canvas);
+  }
+  attach(host) { host.appendChild(this.wrap); }
+  render(S, now) {
+    if (!this.wrap.isConnected || !G.world) return;
+    if (now - this.t < 1 / 20) return; // 20 fps is plenty for a CCTV feed
+    this.t = now;
+    const C = G.world.renderExtCam(S, this.cam, this.canvas, now);
+    const g = this.canvas.getContext('2d'), w = this.canvas.width, h = this.canvas.height;
+    g.fillStyle = 'rgba(0,0,0,0.18)'; for (let y = 0; y < h; y += 3) g.fillRect(0, y, w, 1);
+    g.font = '16px "Share Tech Mono", ui-monospace, monospace'; g.fillStyle = '#ffc27a'; g.shadowColor = '#000'; g.shadowBlur = 4;
+    const n = ((this.cam % 9) + 9) % 9;
+    g.fillText(`CAM ${String(n + 1).padStart(2, '0')}  ${C.name}`, 12, 24);
+    const t = new Date(S.gameTime * 1000);
+    g.fillText(`T+${Math.floor(S.gameTime / 3600)}:${String(t.getUTCMinutes()).padStart(2, '0')}:${String(t.getUTCSeconds()).padStart(2, '0')}`, w - 130, 24);
+    if (Math.floor(now * 2) % 2) { g.fillStyle = '#ff3b2f'; g.beginPath(); g.arc(w - 150, 18, 6, 0, 7); g.fill(); }
+    g.shadowBlur = 0;
+  }
+}
+
 // ---------------- start as host / solo ----------------
 function startHost(role, who, S) {
   G.role = role;
   G.S = S;
   S.debug = role === 'solo' || QS.get('debug') === '1';
   if (S.decks.length < 6) S.decks.push(extDeck()); // older saves
+  if (!S.ring) S.ring = { g: 0, target: 0, spin: 0, wear: 0, brake: false };
+  if (S.weap.cells === undefined) { S.weap.cells = 8; S.weap.cellT = 0; S.weap.pdcFire = [0, 0, 0]; }
+  if (S.stores.srm === undefined) S.stores.srm = 16;
+  for (const id of COMP_IDS) if (!S.comps[id]) S.comps[id] = { id, hp: 100, fire: 0, on: true, pw: 1, prio: COMPS[id].prio, fault: 0, reboot: 0 };
+  for (const p of Object.values(S.players)) if (p.y === undefined) p.y = 0;
   S.fx = [];
   for (const p of Object.values(S.players)) { p.connected = false; p.seat = null; }
   const existing = Object.values(S.players).find((p) => p.name === who.name);
   G.myId = existing ? existing.id : 'p' + Math.random().toString(36).slice(2, 7);
   if (existing) { existing.connected = true; existing.color = who.color; }
-  else S.players[G.myId] = Object.assign(newPlayer(G.myId, who.name, who.color), { x: (Math.random() - 0.5) * 2, z: 3.2 });
+  else S.players[G.myId] = Object.assign(newPlayer(G.myId, who.name, who.color), { x: (Math.random() - 0.5) * 2, z: -3.2, y: 0.3 });
   if (role === 'host') {
     G.code = makeCode();
     lobbyMsg('Opening a channel…');
@@ -113,7 +144,7 @@ function hostOnMsg(pid, m) {
     const old = Object.values(S.players).find((p) => p.name === m.name && !p.connected && p.id !== G.myId);
     let p;
     if (old) { delete S.players[old.id]; p = Object.assign(old, { id: pid, connected: true, color: m.color }); }
-    else p = Object.assign(newPlayer(pid, String(m.name || 'Crew').slice(0, 16), m.color), { x: (Math.random() - 0.5) * 2, z: 3.2 });
+    else p = Object.assign(newPlayer(pid, String(m.name || 'Crew').slice(0, 16), m.color), { x: (Math.random() - 0.5) * 2, z: -3.2, y: 0.3 });
     S.players[pid] = p;
     G.net.send(pid, { t: 'welcome', id: pid, state: snapshot() });
     logLocal(`${p.name} came aboard`, 'good');
@@ -122,7 +153,7 @@ function hostOnMsg(pid, m) {
   }
   const p = S.players[pid];
   if (!p) return;
-  if (m.t === 'pos') { if (p.state !== 'dead') { p.x = m.x; p.z = m.z; p.deck = clamp(m.d | 0, 0, 5); p.yaw = m.y; } }
+  if (m.t === 'pos') { if (p.state !== 'dead') { p.x = m.x; p.z = m.z; p.y = +m.h || 0; p.fl = !!m.f; p.pitch = +m.p || 0; p.deck = clamp(m.d | 0, 0, RING_DECK); p.yaw = m.y; } }
   else if (m.t === 'act') applyAction(S, pid, m.a, m.args || {});
   else if (m.t === 'chat') { const msg = { t: 'chat', from: p.name, color: p.color, text: String(m.text).slice(0, 200) }; G.net.broadcast(msg); showChat(msg); }
 }
@@ -158,6 +189,7 @@ function enterGame() {
   $('#lobby').style.display = 'none';
   $('#game').style.display = 'block';
   if (!G.world) {
+    G.cams = new CamView();
     G.world = new World($('#view'));
     G.world.screenInfo = screenInfo;
     G.world.setQuality(prefs.quality || (G.touchMode || isTouchDevice() ? 'medium' : 'high'));
@@ -179,6 +211,7 @@ function enterGame() {
   }
   const me = G.S.players[G.myId];
   G.ctl.setFrom(me);
+  G.ctl.onImpact = (v) => { act('impact', { v }); G.sfx.play('hit'); if (G.world) G.world.shake = Math.min(1.5, v / 8); };
   G.lastTp = me.tp;
   $('#codebox').textContent = G.role === 'host' ? `JOIN CODE ${G.code}` : G.role === 'client' ? `CREW · ${G.code}` : 'SOLO';
   $('#codebox').style.display = '';
@@ -205,7 +238,8 @@ function panelCtx() {
     local: (a, args) => { if (a === 'local.lift') rideLift(args.deck); if (a === 'local.eva') cycleAirlock(args.out); },
     sfx: G.sfx,
     ext: G.ext,
-    attachView: (host, mode) => G.ext.attach(host, mode),
+    attachView: (host, mode) => (mode === 'cams' ? G.cams.attach(host) : G.ext.attach(host, mode)),
+    cams: G.cams,
     pilotPress: (grp, idx, v) => { G.pilotTouch[grp][idx] = v; },
     closePanel: () => closePanel(),
   };
@@ -218,7 +252,7 @@ function act(a, args = {}) {
 function meView() {
   const p = G.S && G.S.players[G.myId];
   if (!p) return null;
-  return { ...p, x: G.ctl.x, z: G.ctl.z, deck: G.ctl.deck, yaw: G.ctl.yaw, pitch: G.ctl.pitch, moving: G.ctl.moving };
+  return { ...p, x: G.ctl.x, y: G.ctl.y, z: G.ctl.z, deck: G.ctl.deck, yaw: G.ctl.yaw, pitch: G.ctl.pitch, moving: G.ctl.moving, fl: G.ctl.fl, tether: G.ctl.tether };
 }
 function logLocal(text, kind = 'info') { if (G.hud) G.hud.addLog(text, kind); }
 
@@ -248,12 +282,19 @@ function rideLift(deck) {
   G.lifting = true;
   G.sfx.play('lift');
   $('#fade').classList.add('on');
+  const ring = deck === RING_DECK || G.ctl.deck === RING_DECK;
   setTimeout(() => {
-    const p = polar(LIFT_A, SHAFT_R + 0.9);
-    G.ctl.deck = deck; G.ctl.x = p.x + (Math.random() - 0.5) * 0.6; G.ctl.z = p.z; G.ctl.yaw = Math.PI; G.ctl.pitch = 0;
+    if (deck === RING_DECK) { // climb a spoke ladder from the hub down to the ring floor
+      const C = 2 * Math.PI * RING.R, a = RING.spokes[Math.floor(Math.random() * RING.spokes.length)];
+      G.ctl.deck = RING_DECK; G.ctl.x = (Math.random() - 0.5) * 0.8; G.ctl.z = (a / 360) * C + 1.6; G.ctl.y = 0.2; G.ctl.yaw = Math.PI; G.ctl.pitch = 0;
+    } else {
+      const p = polar(LIFT_A, SHAFT_R + 0.9);
+      G.ctl.deck = deck; G.ctl.x = p.x + (Math.random() - 0.5) * 0.6; G.ctl.z = p.z; G.ctl.y = 0; G.ctl.yaw = Math.PI; G.ctl.pitch = 0;
+    }
+    G.ctl.vx = G.ctl.vy = G.ctl.vz = 0;
     pushMyPos(true);
-    setTimeout(() => { $('#fade').classList.remove('on'); G.lifting = false; logLocal(`${DECKS[deck].full}`, 'info'); }, 250);
-  }, 650);
+    setTimeout(() => { $('#fade').classList.remove('on'); G.lifting = false; logLocal(deck === RING_DECK ? `CENTRIFUGE RING — ${(G.S.ring.g).toFixed(2)} g spin gravity` : `${DECKS[deck].full}`, 'info'); }, 250);
+  }, ring ? 1400 : 650);
 }
 
 function cycleAirlock(out) {
@@ -265,8 +306,9 @@ function cycleAirlock(out) {
   G.sfx.play('hiss');
   $('#fade').classList.add('on');
   setTimeout(() => {
-    if (out) { G.ctl.deck = EXT_DECK; G.ctl.x = EXT.hatch.x + (Math.random() - 0.5) * 0.6; G.ctl.z = EXT.hatch.z + 1.8; G.ctl.yaw = Math.PI; }
-    else { const p = polar(AIRLOCK.a, ROOM_R - 1.6); G.ctl.deck = AIRLOCK.deck; G.ctl.x = p.x; G.ctl.z = p.z; G.ctl.yaw = Math.atan2(p.x, p.z); }
+    if (out) { G.ctl.deck = EXT_DECK; G.ctl.x = EXT.hatch.x + 1.3; G.ctl.y = EXT.hatch.y - 1.65 + (Math.random() - 0.5) * 0.6; G.ctl.z = EXT.hatch.z + (Math.random() - 0.5) * 0.6; G.ctl.yaw = Math.PI / 2; } // facing back along the hull, toward the bow
+    else { const p = polar(AIRLOCK.a, ROOM_R - 1.6); G.ctl.deck = AIRLOCK.deck; G.ctl.x = p.x; G.ctl.z = p.z; G.ctl.y = 0.4; G.ctl.yaw = Math.atan2(p.x, p.z); }
+    G.ctl.vx = G.ctl.vy = G.ctl.vz = 0;
     G.ctl.pitch = 0;
     pushMyPos(true);
     act('eva', { out });
@@ -321,11 +363,14 @@ function handleInteraction(dt) {
       else if (f.kind === 'airlock') openPanel('airlock');
       else if (f.kind === 'hatch') openPanel('hatch');
       else if (f.kind === 'item') act('item.pickup', { id: f.id });
+      else if (f.kind === 'spoke') rideLift(3);
+      else if (f.kind === 'bay') G.hud.toast(`${f.label}: an empty experiment rack with power, data and coolant hook-ups, waiting for a science payload.`, '');
     }
   }
+  if (G.touch && G.touch.setFloat) G.touch.setFloat(G.ctl.fl || G.ctl.deck === EXT_DECK);
   if (input.drop) {
     input.drop = false;
-    if (me.item && !blocked) { const fx = -Math.sin(G.ctl.yaw), fz = -Math.cos(G.ctl.yaw); act('item.drop', { x: G.ctl.x + fx * 0.8, z: G.ctl.z + fz * 0.8 }); }
+    if (me.item && !blocked) { const fx = -Math.sin(G.ctl.yaw), fz = -Math.cos(G.ctl.yaw); act('item.drop', { x: G.ctl.x + fx * 0.8, z: G.ctl.z + fz * 0.8, y: G.ctl.fl ? G.ctl.y + 1.0 : 0 }); }
   }
   G.workT -= dt;
   if (!blocked && f && (input.repair || input.item) && G.workT <= 0) {
@@ -343,7 +388,7 @@ function handleInteraction(dt) {
   } else if (!blocked && !f && input.item && me.item && me.item.type === 'medkit' && G.workT <= 0) { G.workT = 0.5; act('work', { kind: 'medkit', target: null }); input.item = false; }
   if (G.touch) {
     G.touch.setLabels({
-      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : 'USE') : (G.panel.open ? 'CLOSE' : ''),
+      use: f && f.kind !== 'hull' ? (f.kind === 'item' ? 'TAKE' : f.kind === 'lift' ? 'LIFT' : f.kind === 'spoke' ? 'CLIMB' : f.kind === 'airlock' || f.kind === 'hatch' ? 'AIRLOCK' : 'USE') : (G.panel.open ? 'CLOSE' : ''),
       repair: f && f.kind === 'comp' && S.comps[f.id].hp < 100 ? 'REPAIR' : '',
       item: me.item ? (me.item.type === 'ext' ? 'SPRAY' : me.item.type === 'patch' ? 'PATCH' : me.item.type === 'medkit' ? 'HEAL' : me.item.type === 'cartridge' ? 'SWAP' : 'REPAIR') : '',
       drop: me.item ? 'DROP' : '',
@@ -365,10 +410,11 @@ function handleFx(list) {
       case 'boom': if (G.world) G.world.flash = 0.9; G.sfx.play('boom'); break;
       case 'rail': if (G.world) G.world.shake = Math.max(G.world.shake, 0.3); G.sfx.play('rail'); break;
       case 'launch': G.sfx.play('launch'); break;
-      case 'pdc': G.sfx.play('pdc'); break;
+      case 'pdc': G.sfx.gatling(1.3, f.n || 1); if (G.world) G.world.onFx(f); break;
+      case 'srm': G.sfx.play('srm'); if (G.world) G.world.onFx(f); break;
       case 'chime': case 'vote': G.sfx.play('chime'); break;
       case 'msg': G.sfx.play('msg'); break;
-      case 'ignite': G.sfx.play('ignite'); break;
+      case 'ignite': G.sfx.play('ignite'); G.hud.toast('DRIVE IGNITION — thrust is gravity now: anyone floating falls toward the drive', 'warn'); break;
       case 'down': if (f.id === G.myId) G.hud.toast('You are down! A crewmate must revive you with a medkit.', 'bad'); break;
       case 'death': if (f.id === G.myId) { closePanel(); G.hud.toast('You died.', 'bad'); } break;
     }
@@ -391,7 +437,7 @@ function frame(tms) {
   const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus;
   G.ctl.update(dt, S, me, blocked);
   if (G.role !== 'client') {
-    if (me) { me.x = G.ctl.x; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; }
+    if (me) { me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; me.pitch = G.ctl.pitch; me.fl = G.ctl.fl; }
     const paused = S.paused || (G.role === 'solo' && G.menuOpen);
     if (!paused) {
       G.simAcc += rdt;
@@ -411,7 +457,8 @@ function frame(tms) {
   }
   handleInteraction(rdt);
   if (G.panel.open && me && me.state !== 'alive' && G.panelKind !== 'status' && G.panelKind !== 'debug') closePanel();
-  G.world.update(S, meView(), dt, now);
+  G.world.update(S, meView(), dt, now, G.ctl);
+  if (G.panel.open) G.cams.render(S, now); // drawn into a corner of the main canvas first, then the main view covers it
   G.world.render();
   if (G.panel.open) G.panel.place(G.world.focusRect());
   document.body.classList.toggle('focused', !!G.world.focus);
@@ -438,9 +485,9 @@ function frame(tms) {
   if (S.phase !== 'play' && !G.ended) showEnd(S.phase === 'won' ? 'MISSION COMPLETE' : 'MISSION FAILED', S.endReason, S);
 }
 function pushMyPos(force) {
-  if (G.role !== 'client' || !G.net) { const me = G.S && G.S.players[G.myId]; if (me) { me.x = G.ctl.x; me.z = G.ctl.z; me.deck = G.ctl.deck; } return; }
+  if (G.role !== 'client' || !G.net) { const me = G.S && G.S.players[G.myId]; if (me) { me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.fl = G.ctl.fl; } return; }
   G.posT = 0.066;
-  G.net.send({ t: 'pos', x: G.ctl.x, z: G.ctl.z, d: G.ctl.deck, y: G.ctl.yaw });
+  G.net.send({ t: 'pos', x: G.ctl.x, z: G.ctl.z, h: G.ctl.y, f: G.ctl.fl ? 1 : 0, p: G.ctl.pitch, d: G.ctl.deck, y: G.ctl.yaw });
 }
 function autosave() {
   if (!G.S || G.role === 'client' || G.S.phase !== 'play' || G.S.tutorial) return;

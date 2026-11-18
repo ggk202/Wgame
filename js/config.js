@@ -1,11 +1,13 @@
 // WOLFRAM — shared constants and game data
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 // ---- Geometry (metres) ----
 export const DECK_H = 7;      // vertical spacing between deck floors
 export const ROOM_R = 11;     // deck radius
 export const ROOM_H = 3.8;    // ceiling height
-export const SHAFT_R = 1.5;   // central lift shaft radius
+export const SHAFT_R = 1.5;   // central trunk radius (open shaft through every deck floor)
+export const RAIL_H = 1.1;    // trunk safety railing height
+export const PLAYER_H = 1.8;  // standing height (eye at EYE)
 export const EYE = 1.65;
 
 // ---- Physics ----
@@ -45,62 +47,69 @@ export const DECKS = [
 // Components. a = angle (deg, 0 = north), r = radius from centre, fp = collision footprint radius.
 // power = base MW, wear = hp lost per real minute at wear x1, prio = default power priority (1 = critical)
 export const COMPS = {
-  // Bridge
+  // Bridge (deck 4, nearest the nose). Ordered around the helm; comms and sensors mirror each other.
   helm:       { name: 'Helm Station', deck: 4, a: 0, r: 8.4, mesh: 'helm', fp: 1.3, panel: 'helm', power: 0.3, wear: 0.3, prio: 1, computer: true },
-  navcomp:    { name: 'Navigation Computer', deck: 4, a: 45, r: 8.6, mesh: 'console', fp: 0.9, panel: 'nav', power: 0.5, wear: 0.3, prio: 2, computer: true },
-  tactical:   { name: 'Fire Control', deck: 4, a: -45, r: 8.6, mesh: 'console', fp: 0.9, panel: 'tactical', power: 0.4, wear: 0.3, prio: 2, computer: true },
-  sensors:    { name: 'Sensor Suite', deck: 4, a: 100, r: 8.6, mesh: 'console', fp: 0.9, panel: 'sensors', power: 2, wear: 0.4, prio: 2, computer: true },
-  comms:      { name: 'Comms Station', deck: 4, a: -100, r: 8.6, mesh: 'console', fp: 0.9, panel: 'comms', power: 0.6, wear: 0.3, prio: 2, computer: true },
-  status:     { name: 'Ship Status Board', deck: 4, a: 180, r: 9.6, mesh: 'board', fp: 0.7, panel: 'status', power: 0.1, wear: 0.15, prio: 3, computer: true },
-  // Habitation
+  navcomp:    { name: 'Navigation Computer', deck: 4, a: 42, r: 8.7, mesh: 'console', fp: 0.9, panel: 'nav', power: 0.5, wear: 0.3, prio: 2, computer: true },
+  tactical:   { name: 'Fire Control', deck: 4, a: -42, r: 8.7, mesh: 'console', fp: 0.9, panel: 'tactical', power: 0.4, wear: 0.3, prio: 2, computer: true },
+  sensors:    { name: 'Sensor Suite', deck: 4, a: -95, r: 8.8, mesh: 'console', fp: 0.9, panel: 'sensors', power: 2, wear: 0.4, prio: 2, computer: true },
+  comms:      { name: 'Comms Station', deck: 4, a: 95, r: 8.8, mesh: 'console', fp: 0.9, panel: 'comms', power: 0.6, wear: 0.3, prio: 2, computer: true },
+  status:     { name: 'Ship Status Board', deck: 4, a: 180, r: 9.9, mesh: 'board', fp: 0.7, panel: 'status', power: 0.1, wear: 0.15, prio: 3, computer: true },
+  // Habitation (deck 3) — the centrifuge hub sits just below it
   lifesupport:{ name: 'Atmosphere Control & Electrolysis', deck: 3, a: 0, r: 8.4, mesh: 'machine', fp: 1.2, panel: 'life', power: 3, wear: 0.6, prio: 1 },
-  scrubbers:  { name: 'CO2 Scrubbers', deck: 3, a: 50, r: 8.6, mesh: 'scrubber', fp: 1.0, panel: 'scrubbers', power: 1, wear: 0.6, prio: 1 },
-  recycler:   { name: 'Water Recycler', deck: 3, a: 100, r: 8.6, mesh: 'tank', fp: 1.0, panel: 'recycler', power: 0.8, wear: 0.5, prio: 2 },
-  hydro:      { name: 'Hydroponics Bay', deck: 3, a: 150, r: 8.4, mesh: 'hydro', fp: 1.5, panel: 'hydro', power: 1.5, wear: 0.4, prio: 3 },
-  medbay:     { name: 'Medbay', deck: 3, a: 210, r: 8.4, mesh: 'bed', fp: 1.2, panel: 'med', power: 0.5, wear: 0.3, prio: 2 },
-  cryo:       { name: 'Cryo Bay (backup crew)', deck: 3, a: 262, r: 8.6, mesh: 'cryo', fp: 1.4, panel: 'cryo', power: 1.5, wear: 0.3, prio: 1 },
-  // Engineering
+  scrubbers:  { name: 'CO2 Scrubbers', deck: 3, a: 45, r: 8.7, mesh: 'scrubber', fp: 1.0, panel: 'scrubbers', power: 1, wear: 0.6, prio: 1 },
+  recycler:   { name: 'Water Recycler', deck: 3, a: -45, r: 8.7, mesh: 'tank', fp: 1.0, panel: 'recycler', power: 0.8, wear: 0.5, prio: 2 },
+  hydro:      { name: 'Hydroponics Bay', deck: 3, a: 95, r: 8.4, mesh: 'hydro', fp: 1.5, panel: 'hydro', power: 1.5, wear: 0.4, prio: 3 },
+  medbay:     { name: 'Medbay', deck: 3, a: -95, r: 8.4, mesh: 'bed', fp: 1.2, panel: 'med', power: 0.5, wear: 0.3, prio: 2 },
+  cryo:       { name: 'Cryo Bay (backup crew)', deck: 3, a: 140, r: 8.6, mesh: 'cryo', fp: 1.4, panel: 'cryo', power: 1.5, wear: 0.3, prio: 1 },
+  centrifuge: { name: 'Centrifuge Control', deck: 3, a: -140, r: 9.0, mesh: 'console', fp: 0.9, panel: 'centrifuge', power: 0.3, wear: 0.3, prio: 3, computer: true },
+  // Engineering (deck 2)
   reactor:    { name: 'Fusion Reactor', deck: 2, a: 0, r: 7.2, mesh: 'reactor', fp: 2.4, panel: 'reactor', power: 0, wear: 0.5, prio: 1 },
-  powerdist:  { name: 'Power Distribution', deck: 2, a: 75, r: 9.4, mesh: 'cabinet', fp: 0.8, panel: 'power', power: 0.2, wear: 0.4, prio: 1 },
-  battery:    { name: 'Battery Bank', deck: 2, a: 125, r: 8.8, mesh: 'battery', fp: 1.1, panel: 'power', power: 0, wear: 0.3, prio: 1 },
-  thermal:    { name: 'Thermal Control', deck: 2, a: -75, r: 9.2, mesh: 'console', fp: 0.9, panel: 'thermal', power: 0.2, wear: 0.3, prio: 1, computer: true },
-  coolpump:   { name: 'Coolant Pumps', deck: 2, a: -125, r: 8.7, mesh: 'pump', fp: 1.1, panel: 'thermal', power: 1, wear: 0.7, prio: 1 },
-  // Cargo
+  powerdist:  { name: 'Power Distribution', deck: 2, a: 62, r: 9.4, mesh: 'cabinet', fp: 0.8, panel: 'power', power: 0.2, wear: 0.4, prio: 1 },
+  thermal:    { name: 'Thermal Control', deck: 2, a: -62, r: 9.2, mesh: 'console', fp: 0.9, panel: 'thermal', power: 0.2, wear: 0.3, prio: 1, computer: true },
+  battery:    { name: 'Battery Bank', deck: 2, a: 118, r: 8.8, mesh: 'battery', fp: 1.1, panel: 'power', power: 0, wear: 0.3, prio: 1 },
+  coolpump:   { name: 'Coolant Pumps', deck: 2, a: -118, r: 8.7, mesh: 'pump', fp: 1.1, panel: 'thermal', power: 1, wear: 0.7, prio: 1 },
+  // Cargo (deck 1) — the airlock opens to starboard
   fabricator: { name: 'Fabricator', deck: 1, a: 0, r: 8.4, mesh: 'fab', fp: 1.3, panel: 'fab', power: 0.2, wear: 0.5, prio: 3 },
-  stores:     { name: 'Stores & Spares', deck: 1, a: 60, r: 9.0, mesh: 'shelves', fp: 1.1, panel: 'stores', power: 0.1, wear: 0.1, prio: 3 },
-  magazine:   { name: 'Munitions Magazine', deck: 1, a: 120, r: 8.8, mesh: 'magazine', fp: 1.1, panel: 'magazine', power: 0.3, wear: 0.3, prio: 2 },
-  dronebay:   { name: 'Repair Drone Bay', deck: 1, a: -60, r: 8.4, mesh: 'dronebay', fp: 1.4, panel: 'drones', power: 0.5, wear: 0.4, prio: 2 },
-  // Drive
+  stores:     { name: 'Stores & Spares', deck: 1, a: 58, r: 9.0, mesh: 'shelves', fp: 1.1, panel: 'stores', power: 0.1, wear: 0.1, prio: 3 },
+  dronebay:   { name: 'Repair Drone Bay', deck: 1, a: -58, r: 8.4, mesh: 'dronebay', fp: 1.4, panel: 'drones', power: 0.5, wear: 0.4, prio: 2 },
+  magazine:   { name: 'Munitions Magazine', deck: 1, a: -118, r: 8.8, mesh: 'magazine', fp: 1.1, panel: 'magazine', power: 0.3, wear: 0.3, prio: 2 },
+  // Drive (deck 0, against the shadow shield)
   drivecore:  { name: 'Fusion Torch Drive', deck: 0, a: 0, r: 7.0, mesh: 'drive', fp: 2.4, panel: 'drive', power: 2, wear: 0.4, prio: 1 },
-  drivectl:   { name: 'Drive Control', deck: 0, a: 75, r: 9.2, mesh: 'console', fp: 0.9, panel: 'drive', power: 0.3, wear: 0.3, prio: 1, computer: true },
-  tanks:      { name: 'Reaction Mass Tanks', deck: 0, a: -75, r: 8.6, mesh: 'tanks', fp: 1.6, panel: 'tanks', power: 0.2, wear: 0.2, prio: 2 },
-  injector:   { name: 'Pellet Injector', deck: 0, a: 140, r: 8.8, mesh: 'machine', fp: 1.1, panel: 'tanks', power: 0.4, wear: 0.5, prio: 1 },
-  // External (repaired by drones)
-  // External (hull exterior, reached by EVA through the Cargo airlock, or repaired by drones)
-  // ex/ez = position on the dorsal equipment spine (x across, z along the ship; -z toward the bow)
-  radA:       { name: 'Radiator Wing A', ext: true, ex: -6.4, ez: 3, fp: 0.8, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
-  radB:       { name: 'Radiator Wing B', ext: true, ex: 6.4, ez: 3, fp: 0.8, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
-  pdc1:       { name: 'PDC Turret 1', ext: true, ex: -4.6, ez: -27, fp: 1.0, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
-  pdc2:       { name: 'PDC Turret 2', ext: true, ex: 4.6, ez: -27, fp: 1.0, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
-  pdc3:       { name: 'PDC Turret 3', ext: true, ex: 0, ez: 30, fp: 1.0, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
-  railgun:    { name: 'Spinal Railgun', ext: true, ex: 0, ez: -12, fp: 1.4, mesh: 'railgun', power: 0.3, wear: 0.15, prio: 2 },
-  antenna:    { name: 'High-Gain Antenna', ext: true, ex: -4.6, ez: 18, fp: 1.0, mesh: 'antenna', power: 0.3, wear: 0.15, prio: 3 },
-  sensorArray:{ name: 'External Sensor Array', ext: true, ex: 4.6, ez: 18, fp: 1.0, mesh: 'sensorarray', power: 0.5, wear: 0.2, prio: 2 },
+  drivectl:   { name: 'Drive Control', deck: 0, a: 62, r: 9.2, mesh: 'console', fp: 0.9, panel: 'drive', power: 0.3, wear: 0.3, prio: 1, computer: true },
+  tanks:      { name: 'Reaction Mass Tanks', deck: 0, a: -62, r: 8.6, mesh: 'tanks', fp: 1.6, panel: 'tanks', power: 0.2, wear: 0.2, prio: 2 },
+  injector:   { name: 'Pellet Injector', deck: 0, a: 125, r: 8.8, mesh: 'machine', fp: 1.1, panel: 'tanks', power: 0.4, wear: 0.5, prio: 1 },
+  // External (hull exterior, reached on EVA through the starboard airlock, or repaired by drones).
+  // ex/ey/ez = position in the ship frame: x starboard, y dorsal, z aft (bow at -z).
+  radA:       { name: 'Radiator Wing A (port)', ext: true, ex: -5.6, ey: 0, ez: -8, fp: 1.0, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
+  radB:       { name: 'Radiator Wing B (starboard)', ext: true, ex: 5.6, ey: 0, ez: -8, fp: 1.0, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
+  pdc1:       { name: 'PDC Gatling 1 (port)', ext: true, ex: -8.8, ey: 8.9, ez: -53, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  pdc2:       { name: 'PDC Gatling 2 (starboard)', ext: true, ex: 8.8, ey: 8.9, ez: -53, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  pdc3:       { name: 'PDC Gatling 3 (ventral)', ext: true, ex: 0, ey: -5.6, ez: 15, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  railgun:    { name: 'Spinal Railgun', ext: true, ex: 0, ey: -13.9, ez: -54, fp: 1.6, mesh: 'railgun', power: 0.3, wear: 0.15, prio: 2 },
+  launcher:   { name: 'Missile Launcher (8-cell)', ext: true, ex: 0, ey: 13.1, ez: -42, fp: 1.4, mesh: 'launcher', power: 0.3, wear: 0.15, prio: 2 },
+  antenna:    { name: 'High-Gain Antenna', ext: true, ex: -4.6, ey: 6.0, ez: 2, fp: 1.0, mesh: 'antenna', power: 0.3, wear: 0.15, prio: 3 },
+  sensorArray:{ name: 'External Sensor Array', ext: true, ex: 3.0, ey: 12.8, ez: -85, fp: 1.0, mesh: 'sensorarray', power: 0.5, wear: 0.2, prio: 2 },
 };
 export const COMP_IDS = Object.keys(COMPS);
 
 // One emergency locker per deck, plus the lift door
 export const LOCKERS = [
-  { deck: 0, a: -140, r: 9.6 }, { deck: 1, a: -120, r: 9.6 }, { deck: 2, a: 180, r: 9.6 },
-  { deck: 3, a: 315, r: 9.6 }, { deck: 4, a: 140, r: 9.6 },
+  { deck: 0, a: -150, r: 9.7 }, { deck: 1, a: 160, r: 9.7 }, { deck: 2, a: 160, r: 9.7 },
+  { deck: 3, a: 165, r: 9.7 }, { deck: 4, a: 140, r: 9.7 },
 ];
 export const LIFT_A = 180;
-// Exterior (EVA). Players outside have deck = EXT_DECK and walk the dorsal equipment spine with mag boots.
+// Exterior (EVA). Players outside have deck = EXT_DECK and fly a SAFER-style jet pack, clipped to a safety tether.
+// Coordinates are the ship frame (x starboard, y dorsal, z aft). Any thrust above maxG reels the tether in.
 export const EXT_DECK = 5;
-export const EXT = { w: 7.0, zMin: -37, zMax: 33, hatch: { x: -3.6, z: -34 }, maxG: 0.6 };
-export const AIRLOCK = { deck: 1, a: 200 };            // inner airlock door on the Cargo deck
-export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : (DECKS[d] ? DECKS[d].name : '?'));           // lift door faces south
-export const SHELTER = { deck: 3, a: 315, r: 6.4, rad: 2.2 }; // storm shelter zone (water-wall cubicle)
+export const EXT = { hatch: { x: 16.2, y: 0, z: -42 }, maxG: 0.08, tether: 110, jet: 0.9, vmax: 4.5 };
+export const AIRLOCK = { deck: 1, a: 110 };            // inner airlock door on the Cargo deck (starboard side)
+// Centrifuge: a spinning ring around the hub between Habitation and Engineering. Inside, "down" is outward.
+// R = floor radius (m), W = corridor width (along the ship axis), H = ceiling height. Spin gravity g = w^2 R.
+export const RING_DECK = 6;
+export const RING = { R: 25.5, W: 6.4, H: 4.2, maxG: 0.5, spokes: [0, 120, 240], bays: 6 };
+export const atmoDeck = (d) => (d === RING_DECK ? 3 : d); // the ring shares the hub's (Habitation) atmosphere
+export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : d === RING_DECK ? 'Centrifuge ring' : (DECKS[d] ? DECKS[d].name : '?')); // lift gate faces south
+export const SHELTER = { deck: 3, a: 180, r: 7.0, rad: 2.1 }; // storm shelter zone (water-wall cubicle)
 
 export const ITEMS = {
   spares:    { name: 'Spare Parts Kit', color: 0xf0b030, short: 'SPARES' },
@@ -116,6 +125,7 @@ export const RECIPES = {
   medkit:     { name: 'Medkit', kg: 6, t: 20, qty: 1 },
   cartridge:  { name: 'Scrubber Cartridge', kg: 8, t: 15, qty: 1 },
   missiles:   { name: 'Torpedo', kg: 60, t: 60, qty: 1 },
+  srm:        { name: 'Kestrel Missiles x4', kg: 28, t: 40, qty: 4 },
   slugs:      { name: 'Railgun Slugs x5', kg: 15, t: 30, qty: 5 },
   pdcAmmo:    { name: 'PDC Ammo x500', kg: 10, t: 20, qty: 500 },
   chaff:      { name: 'Chaff Canister', kg: 8, t: 20, qty: 1 },
@@ -174,6 +184,7 @@ export const STATION_PRICES = {
   medkit:     { name: 'Medkit x2', cost: 3 },
   cartridge:  { name: 'Scrubber Cartridge x2', cost: 3 },
   missiles:   { name: 'Torpedo x2', cost: 8 },
+  srm:        { name: 'Kestrel missiles x8', cost: 6 },
   slugs:      { name: 'Railgun Slugs x10', cost: 4 },
   pdcAmmo:    { name: 'PDC Ammo x2000', cost: 4 },
   feedstock:  { name: 'Fab Feedstock 100 kg', cost: 5 },

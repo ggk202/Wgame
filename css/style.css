@@ -305,3 +305,5 @@ body.touch #panel .btn { padding: 9px 13px; }
 @media (min-width: 900px) { body.focused #tut { top: calc(60px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); transform: none; width: 320px; font-size: 12px; } }
 body.focused #tut .tut-title { font-size: 14px; }
 body.touch #tut { top: calc(36px + env(safe-area-inset-top)); }
+#tvert { position: fixed; right: calc(16px + env(safe-area-inset-right)); bottom: calc(250px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
+#tvert .tb { width: 86px; }

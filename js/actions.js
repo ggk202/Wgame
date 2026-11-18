@@ -1,19 +1,19 @@
 // All player-initiated state changes. Executed on the host only.
-import { COMPS, COMP_IDS, ITEMS, RECIPES, LOCKERS, STATION_PRICES, SHIP, DECKS, WAYPOINTS, ROOM_R, EXT_DECK, deckName } from './config.js';
+import { COMPS, COMP_IDS, ITEMS, RECIPES, LOCKERS, STATION_PRICES, SHIP, DECKS, WAYPOINTS, ROOM_R, EXT_DECK, RING_DECK, deckName } from './config.js';
 import { clamp, polar, compPos, compDeck, log, fx, rand } from './util.js';
 import { eff, startFlip, depart, scram, maxG, igniteComp } from './sim.js';
 import { startApproach, sasModes } from './attitude.js';
-import { fireRail, launchTorpedo, deployChaff, startEncounter, applyHit, addBreach } from './combat.js';
+import { fireRail, launchTorpedo, launchSRM, deployChaff, startEncounter, applyHit, addBreach } from './combat.js';
 import { castVote, pirateDemand, fireEvent } from './story.js';
 import { EVENTS } from './events.js';
 
 const toast = (S, p, text) => fx(S, 'toast', { to: p.id, text });
-const dist2 = (p, x, z) => Math.hypot(p.x - x, p.z - z);
+const dist2 = (p, x, z, y = 0) => Math.hypot(p.x - x, p.z - z, Math.max(0, Math.abs((p.y || 0) - y) - 1.2));
 function nearComp(p, id, extra = 2.2) {
   const c = COMPS[id];
   if (!c || compDeck(id) !== p.deck) return false;
   const cp = compPos(id);
-  return dist2(p, cp.x, cp.z) < c.fp + extra;
+  return dist2(p, cp.x, cp.z, cp.y) < c.fp + extra;
 }
 // Console guard: player must be seated at one of the listed consoles and it must work.
 function at(S, p, ids) {
@@ -43,7 +43,8 @@ export function applyAction(S, pid, a, args = {}) {
     // ----- items -----
     case 'item.drop':
       if (!p.item) return;
-      S.items.push({ id: 'i' + Math.random().toString(36).slice(2, 8), type: p.item.type, charge: p.item.charge, deck: p.deck, x: clamp(+args.x || p.x, -ROOM_R, ROOM_R), z: clamp(+args.z || p.z, -ROOM_R, ROOM_R) });
+      { const big = p.deck === EXT_DECK || p.deck === RING_DECK ? 400 : ROOM_R;
+        S.items.push({ id: 'i' + Math.random().toString(36).slice(2, 8), type: p.item.type, charge: p.item.charge, deck: p.deck, x: clamp(+args.x || p.x, -big, big), y: clamp(+args.y || 0, -60, 60), z: clamp(+args.z || p.z, -big, big) }); }
       p.item = null; return;
     case 'item.pickup': {
       const it = S.items.find((i) => i.id === args.id);
@@ -51,6 +52,7 @@ export function applyAction(S, pid, a, args = {}) {
       p.item = { type: it.type, charge: it.charge };
       S.items = S.items.filter((i) => i !== it); return;
     }
+    case 'impact': { const v = clamp(+args.v || 0, 0, 30); if (v > 5.5 && p.state === 'alive' && !p.god) { p.hp -= (v - 5.5) * 9; log(S, `${p.name} hit ${p.deck === EXT_DECK ? 'the hull' : 'the deck'} hard (${v.toFixed(1)} m/s)`, 'warn'); fx(S, 'hit', { deck: p.deck, power: 0.2 }); } return; }
     case 'eva': log(S, args.out ? `${p.name} cycled out through the airlock for EVA` : `${p.name} is back inside`, 'info'); return;
     case 'locker.suit': {
       const lk = LOCKERS.find((l) => l.deck === p.deck);
@@ -132,6 +134,9 @@ export function applyAction(S, pid, a, args = {}) {
     case 'tac.charge': if (!at(S, p, 'tactical')) return; W.charging = !!args.on; return;
     case 'tac.rail': { if (!at(S, p, 'tactical')) return; const e = fireRail(S); if (e) err(e); return; }
     case 'tac.torp': { if (!at(S, p, 'tactical')) return; const e = launchTorpedo(S); if (e) err(e); return; }
+    case 'ring.target': if (!at(S, p, 'centrifuge')) return; S.ring.target = clamp(+args.g || 0, 0, 0.5); S.ring.brake = false; log(S, `${p.name}: centrifuge set to ${S.ring.target.toFixed(2)} g`, 'info'); return;
+    case 'ring.brake': if (!at(S, p, 'centrifuge')) return; S.ring.brake = !!args.on; if (args.on) { S.ring.target = 0; log(S, `${p.name}: centrifuge emergency brake`, 'warn'); } return;
+    case 'tac.srm': { if (!at(S, p, 'tactical')) return; const e = launchSRM(S, args.n || 1); if (e) err(e); return; }
     case 'tac.chaff': { if (!at(S, p, 'tactical')) return; const e = deployChaff(S); if (e) err(e); return; }
     case 'tac.pdc':
       if (!at(S, p, 'tactical')) return;
@@ -310,6 +315,7 @@ function stationBuy(S, p, item) {
     case 'medkit': st.medkit += 2; break;
     case 'cartridge': st.cartridge += 2; break;
     case 'missiles': st.missiles += 2; break;
+    case 'srm': st.srm += 8; break;
     case 'slugs': st.slugs += 10; break;
     case 'pdcAmmo': st.pdcAmmo += 2000; break;
     case 'feedstock': st.feedstock += 100; break;
@@ -328,7 +334,7 @@ function debugAction(S, p, a, args) {
     case 'debug.event': fireEvent(S, args.id); break;
     case 'debug.heal': for (const q of Object.values(S.players)) { q.hp = 100; q.dose = 0; if (q.state !== 'alive' && q.state !== 'spectator') q.state = 'alive'; } break;
     case 'debug.repair': for (const id of COMP_IDS) { S.comps[id].hp = 100; S.comps[id].fire = 0; S.comps[id].fault = 0; } S.breaches = []; S.hull = 100; break;
-    case 'debug.resources': Object.assign(S.stores, { spares: 20, patch: 10, medkit: 10, cartridge: 6, feedstock: 500, missiles: 10, slugs: 40, pdcAmmo: 8000, chaff: 6 }); S.mass.rmass = SHIP.rmassMax; S.credits += 50; S.life.o2 = 1500; S.life.n2 = 3500; break;
+    case 'debug.resources': Object.assign(S.stores, { srm: 24, spares: 20, patch: 10, medkit: 10, cartridge: 6, feedstock: 500, missiles: 10, slugs: 40, pdcAmmo: 8000, chaff: 6 }); S.mass.rmass = SHIP.rmassMax; S.credits += 50; S.life.o2 = 1500; S.life.n2 = 3500; break;
     case 'debug.skip': if (S.nav.state === 'transit') { S.nav.x = S.nav.L * (args.f ?? 0.9); } break;
     case 'debug.arrive': if (S.nav.state === 'transit') { S.nav.x = S.nav.L - 1e8; S.nav.v = 0; } break;
     case 'debug.warp': S.settings.warpBase = clamp(+args.w || 420, 10, 20000); break;

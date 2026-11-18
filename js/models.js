@@ -1,13 +1,13 @@
 // WOLFRAM models: ISS-era, NASA-style look built procedurally (geometry + canvas textures, no image files).
 import * as THREE from 'three';
-import { COMPS, COMP_IDS, EXT } from './config.js';
+import { COMPS, COMP_IDS } from './config.js';
 
 // ---------------- palette ----------------
 export const PAL = {
   white: 0xeceae3, off: 0xd9d5c9, beige: 0xcfc4a8, grey: 0x9aa1a9, steel: 0x6d747d, dark: 0x30353c, black: 0x15181c,
   blue: 0x2e5b96, rail: 0xd2a948, gold: 0xc9962c, red: 0xc23a2a, orange: 0xe07a2a,
 };
-export const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.72, metalness: 0.08, ...o });
+export const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.08, ...o });
 export const metal = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.75, ...o });
 export const emis = (color, k = 1) => new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k) });
 
@@ -525,112 +525,5 @@ export function buildAvatar(color) {
     },
   };
   return api;
-}
-
-// ---------------- exterior: ISS-style long-spine torch freighter ----------------
-// The EVA walkway (y = 0, |x| <= EXT.w, EXT.zMin..EXT.zMax) is the dorsal catwalk on top of the main truss.
-export function buildExterior(compsOut) {
-  const g = new THREE.Group();
-  const add = adder(g);
-  const L = EXT.zMax - EXT.zMin + 4, zc = (EXT.zMax + EXT.zMin) / 2;
-  const white = mat(PAL.white), grey = mat(PAL.grey), dark = mat(PAL.dark), black = mat(PAL.black), rail = mat(PAL.rail), blue = mat(PAL.blue);
-  const mliM = (rx, ry) => texMat(mliTex([rx, ry]));
-  const goldM = (rx, ry) => goldMat([rx, ry]);
-
-  // catwalk with ISS-yellow handrails
-  add(new THREE.BoxGeometry(EXT.w * 2 + 1.2, 0.25, L), texMat(grateTex([4, 20])), 0, -0.13, zc);
-  for (const x of [-EXT.w - 0.55, EXT.w + 0.55]) {
-    add(new THREE.CylinderGeometry(0.045, 0.045, L, 6), rail, x, 1.0, zc, Math.PI / 2);
-    add(new THREE.CylinderGeometry(0.035, 0.035, L, 6), rail, x, 0.55, zc, Math.PI / 2);
-    for (let z = EXT.zMin; z <= EXT.zMax; z += 3) add(new THREE.BoxGeometry(0.06, 1.0, 0.06), grey, x, 0.5, z);
-  }
-  for (let z = EXT.zMin + 2; z < EXT.zMax; z += 8) add(new THREE.BoxGeometry(EXT.w * 2, 0.02, 0.12), rail, 0, 0.01, z); // foot-restraint lines
-
-  // main box truss under the catwalk (instanced struts)
-  const tw = 4, ty0 = -9, ty1 = -0.4, tz0 = -40, tz1 = 40, bay = 5;
-  const S = [];
-  const C = [[-tw, ty0], [tw, ty0], [tw, ty1], [-tw, ty1]];
-  for (const [x, y] of C) S.push([x, y, tz0, x, y, tz1, 0.32]);
-  for (let z = tz0; z <= tz1; z += bay) {
-    for (let i = 0; i < 4; i++) { const a = C[i], b = C[(i + 1) % 4]; S.push([a[0], a[1], z, b[0], b[1], z, 0.2]); }
-    if (z + bay <= tz1) for (let i = 0; i < 4; i++) { const a = C[i], b = C[(i + 1) % 4]; const flip = (z / bay) % 2 ? 1 : 0; S.push(flip ? [a[0], a[1], z, b[0], b[1], z + bay, 0.14] : [b[0], b[1], z, a[0], a[1], z + bay, 0.14]); }
-  }
-  g.add(struts(S, mat(0xc8ccd0)));
-  // utility trays along the truss
-  add(new THREE.BoxGeometry(0.6, 0.3, tz1 - tz0), goldM(1, 30), -tw + 0.4, ty0 + 0.4, 0);
-  add(new THREE.BoxGeometry(0.6, 0.3, tz1 - tz0), dark, tw - 0.4, ty0 + 0.4, 0);
-
-  // crew habitat module (where the five interior decks are), white MLI, with a cupola-like bridge at the bow
-  const habR = 12, habZ0 = -76, habZ1 = -41, habY = -12;
-  add(new THREE.CylinderGeometry(habR, habR, habZ1 - habZ0, 40, 1, true), mliM(10, 4), 0, habY, (habZ0 + habZ1) / 2, Math.PI / 2);
-  for (let i = 0; i <= 5; i++) add(new THREE.TorusGeometry(habR + 0.05, 0.22, 6, 48), grey, 0, habY, habZ0 + i * 7, 0);
-  const aftCap = add(new THREE.CircleGeometry(habR, 40), mliM(4, 4), 0, habY, habZ1); aftCap.rotation.y = 0;
-  const bow = add(new THREE.SphereGeometry(habR, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2), mliM(8, 2), 0, habY, habZ0, -Math.PI / 2);
-  bow.scale.set(1, 0.42, 1);
-  // bridge windows (cupola-style ring of panes)
-  for (let i = 0; i < 7; i++) { const a = -0.9 + i * 0.3; const w = add(new THREE.BoxGeometry(1.6, 1.0, 0.1), emis(0xbfd6ff, 0.55), Math.sin(a) * 7.5, habY + Math.cos(a) * 7.5, habZ0 - 3.6, 0, 0, -a); w.rotation.x = 0.55; }
-  // markings: mission patch + name, and a blue stripe band
-  const decal = new THREE.Mesh(new THREE.PlaneGeometry(16, 4), new THREE.MeshStandardMaterial({ map: decalTex(), transparent: true, roughness: 0.8 }));
-  decal.position.set(habR + 0.06, habY + 2, -58); decal.rotation.y = Math.PI / 2; g.add(decal);
-  const decal2 = decal.clone(); decal2.position.x = -habR - 0.06; decal2.rotation.y = -Math.PI / 2; g.add(decal2);
-  add(new THREE.CylinderGeometry(habR + 0.03, habR + 0.03, 1.2, 40, 1, true), blue, 0, habY, -47, Math.PI / 2);
-  // docking port at the bow and node + airlock module joining hab to truss
-  add(new THREE.CylinderGeometry(1.6, 1.6, 2.5, 18), white, 0, habY, habZ0 - 6, Math.PI / 2);
-  add(new THREE.TorusGeometry(1.6, 0.18, 6, 18), rail, 0, habY, habZ0 - 7.3);
-  add(new THREE.CylinderGeometry(4.2, 4.2, 4, 24), mliM(3, 1), 0, -5, -39, Math.PI / 2);
-  // handrails on the hab hull
-  for (let i = 0; i < 8; i++) add(new THREE.CylinderGeometry(0.03, 0.03, 3, 6), rail, -3 + i * 0.85 * 0 + (i - 4) * 1.4, -0.2 + 0.05, -44 - i * 3.5, Math.PI / 2);
-
-  // auxiliary photovoltaic arrays (ISS-style blankets) on masts from the hab
-  for (const s of [-1, 1]) {
-    add(new THREE.CylinderGeometry(0.25, 0.25, 30, 8), grey, s * (habR + 15), habY, -60, 0, 0, Math.PI / 2);
-    for (const dz of [-3.2, 3.2]) add(new THREE.BoxGeometry(28, 0.05, 5.6), texMat(solarTex([4, 1])), s * (habR + 15), habY, -60 + dz);
-    add(new THREE.BoxGeometry(1.0, 1.0, 1.0), goldM(1, 1), s * (habR + 0.6), habY, -60);
-  }
-
-  // spherical propellant cluster (white MLI) forward of the radiators
-  const sph = mliM(3, 2);
-  for (const zs of [-26, -18]) for (const [x, y] of [[-7.6, -4.5], [7.6, -4.5], [-5.2, -12.5], [5.2, -12.5], [0, -14.5]]) add(new THREE.SphereGeometry(3.1, 20, 14), sph, x, y, zs);
-  // long gold-foil reaction-mass tanks (cylinders with white end domes)
-  for (const [x, y] of [[-8.2, -5.2], [8.2, -5.2], [0, -14.6]]) {
-    add(new THREE.CylinderGeometry(3.2, 3.2, 24, 28, 1, true), goldM(4, 3), x, y, 22, Math.PI / 2);
-    for (const [zz, rot] of [[10, Math.PI / 2], [34, -Math.PI / 2]]) { const d = add(new THREE.SphereGeometry(3.2, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), mliM(2, 1), x, y, zz, rot); d.scale.set(1, 0.4, 1); }
-    for (const zz of [14, 22, 30]) add(new THREE.TorusGeometry(3.23, 0.12, 6, 28), grey, x, y, zz);
-  }
-
-  // shadow shield, reactor bus and the torch drive nozzle
-  add(new THREE.CylinderGeometry(9.5, 5, 1.6, 36), dark, 0, -6, 41, Math.PI / 2);
-  add(new THREE.CylinderGeometry(5, 5, 9, 28), mliM(4, 2), 0, -6, 46.5, Math.PI / 2);
-  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; add(new THREE.BoxGeometry(0.4, 0.4, 9), grey, Math.cos(a) * 5.1, -6 + Math.sin(a) * 5.1, 46.5); }
-  add(new THREE.CylinderGeometry(3, 9.5, 14, 32, 1, true), new THREE.MeshStandardMaterial({ color: 0x3c3f45, side: THREE.DoubleSide, roughness: 0.45, metalness: 0.7 }), 0, -6, 58, -Math.PI / 2);
-  add(new THREE.TorusGeometry(9.5, 0.3, 6, 36), grey, 0, -6, 65);
-  const plume = new THREE.Mesh(new THREE.ConeGeometry(9, 140, 28, 1, true), new THREE.MeshBasicMaterial({ color: 0xc8b0ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-  plume.rotation.x = -Math.PI / 2; plume.position.set(0, -6, 135); plume.visible = false; g.add(plume);
-  g.userData.plume = plume;
-
-  // airlock hatch on the catwalk
-  const hatch = new THREE.Group(); hatch.position.set(EXT.hatch.x, 0, EXT.hatch.z);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.14, 8, 24), rail); ring.rotation.x = Math.PI / 2; ring.position.y = 0.12; hatch.add(ring);
-  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.88, 0.14, 24), white); lid.position.y = 0.08; hatch.add(lid);
-  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.04, 6, 16), grey); wheel.rotation.x = Math.PI / 2; wheel.position.y = 0.18; hatch.add(wheel);
-  const hl = textSprite('AIRLOCK → CARGO DECK', { width: 1.6, size: 28, color: '#ffe0a0' }); hl.position.y = 1.6; hatch.add(hl);
-  g.add(hatch);
-  const sl = textSprite('DORSAL CATWALK — keep thrust below 0.6 g during EVA', { width: 3.8, size: 26, color: '#ffd080' }); sl.position.set(0, 2.6, EXT.hatch.z + 3); g.add(sl);
-  // work lights on the rail posts
-  for (const z of [-30, -12, 6, 24]) for (const x of [-EXT.w - 0.55, EXT.w + 0.55]) add(new THREE.BoxGeometry(0.25, 0.18, 0.4), emis(0xfff4d0, 1), x, 1.15, z);
-
-  // components
-  for (const id of COMP_IDS) {
-    const c = COMPS[id];
-    if (!c.ext) continue;
-    const built = buildComp(c.mesh, PAL.blue);
-    built.group.position.set(c.ex, 0, c.ez);
-    if (id === 'radB') built.group.rotation.y = Math.PI;
-    g.add(built.group);
-    const label = textSprite(c.name, { width: Math.min(1.9, 0.065 * c.name.length + 0.3), size: 30 });
-    label.position.set(c.ex, built.height + 0.8, c.ez); g.add(label);
-    if (compsOut) compsOut[id] = { ...built, label };
-  }
-  return g;
 }
 

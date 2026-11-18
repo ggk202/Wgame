@@ -1,15 +1,19 @@
 // Three.js scene: five stacked decks of the CSV Wolfram, the hull exterior, crew and effects.
 // Models and textures live in models.js (ISS-era, NASA-style look).
 import * as THREE from 'three';
-import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WAYPOINTS, EXT, EXT_DECK, AIRLOCK } from './config.js';
+import { DECKS, COMPS, COMP_IDS, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WAYPOINTS, EXT, EXT_DECK, RING, RING_DECK, G0 } from './config.js';
 import { polar, compDeck } from './util.js';
-import { PAL, mat, emis, texMat, mliTex, rackTex, floorTex, textSprite, planeLabel, buildComp, buildFire, buildAvatar, buildExterior } from './models.js';
+import { mat, textSprite, buildComp, buildFire, buildAvatar } from './models.js';
 import { buildPlanet } from './planet.js';
 import { buildStation } from './npc.js';
+import { buildDeckInterior, buildRingInterior, ringPlace, RING_CENTER } from './interior.js';
+import { buildShipExterior, buildExtComp, EXT_CAMS, flashTex } from './ship.js';
+import { SL } from './hull.js';
+import { qrot, qconj } from './attitude.js';
 
-export { textSprite, buildComp, buildFire, buildAvatar, buildExterior };
-
-const SEG = 16;
+export { textSprite, buildComp, buildFire, buildAvatar, buildShipExterior, buildExtComp, buildRingInterior, buildDeckInterior };
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const XAX = new THREE.Vector3(1, 0, 0), ZAX = new THREE.Vector3(0, 0, 1);
 // Soft studio-style environment for PBR reflections (bright overhead panels, dim floor)
 function makeEnvironment(renderer) {
   const env = new THREE.Scene();
@@ -92,6 +96,7 @@ function drawScreen(cv, info, st, now) {
   gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.6)'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
 }
 
+
 export class World {
   constructor(canvas) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: window.devicePixelRatio < 2, powerPreference: 'high-performance' });
@@ -103,7 +108,7 @@ export class World {
     this.scene = new THREE.Scene();
     this.scene.environment = makeEnvironment(this.renderer);
     this.scene.background = new THREE.Color(0x000002);
-    this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 7000);
+    this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 9000);
     this.scene.add(this.camera);
     this.hemi = new THREE.HemisphereLight(0xf2f4ff, 0x4a4a44, 1.0);
     this.scene.add(this.hemi);
@@ -113,30 +118,35 @@ export class World {
     this.scene.add(this.point2);
     this.sunlight = new THREE.DirectionalLight(0xfff6e8, 0);
     this.sunlight.position.set(-60, 40, 30);
-    this.sunlight.shadow.camera.left = -70; this.sunlight.shadow.camera.right = 70; this.sunlight.shadow.camera.top = 70; this.sunlight.shadow.camera.bottom = -70;
-    this.sunlight.shadow.camera.near = 1; this.sunlight.shadow.camera.far = 400; this.sunlight.shadow.bias = -0.0004; this.sunlight.shadow.normalBias = 0.04;
+    const sc = this.sunlight.shadow.camera; sc.left = -80; sc.right = 80; sc.top = 80; sc.bottom = -80; sc.near = 1; sc.far = 500;
+    this.sunlight.shadow.bias = -0.0004; this.sunlight.shadow.normalBias = 0.05;
     this.scene.add(this.sunlight); this.scene.add(this.sunlight.target);
     // ceiling key light for the current deck: soft contact shadows under consoles, crew and kit
     this.key = new THREE.SpotLight(0xfff8f0, 0, 24, 1.25, 0.6, 1.2);
-    this.key.shadow.camera.near = 0.5; this.key.shadow.camera.far = 12; this.key.shadow.bias = -0.0006; this.key.shadow.normalBias = 0.03;
+    this.key.shadow.camera.near = 0.5; this.key.shadow.camera.far = 14; this.key.shadow.bias = -0.0006; this.key.shadow.normalBias = 0.03;
     this.scene.add(this.key); this.scene.add(this.key.target);
     this.decks = [];
     this.comps = {};
     this.avatars = {};
     this.itemMeshes = {};
     this.breachMeshes = {};
-    this.shake = 0;
-    this.flash = 0;
+    this.shake = 0; this.flash = 0;
     this.planetKind = null; this.planet = null;
     this.buildStars();
-    for (const d of DECKS) this.buildDeck(d);
-    this.exterior = buildExterior(this.comps);
-    this.exterior.position.y = EXT_DECK * DECK_H;
-    this.exterior.traverse((o) => { if (o.isMesh && !o.material.isMeshBasicMaterial && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } });
+    for (const d of DECKS) { const { group, comps } = buildDeckInterior(d); this.scene.add(group); this.decks.push(group); Object.assign(this.comps, comps); }
+    this.exterior = buildShipExterior(this.comps);
+    this.exterior.position.y = EXT_DECK * DECK_H + 60;
     this.scene.add(this.exterior);
     this.decks.push(this.exterior);
-    for (const g of this.decks.slice(0, 5)) g.traverse((o) => { if (o.isMesh && !o.material.isMeshBasicMaterial && !o.material.transparent) { o.castShadow = o.position.y > 0.05 || o.parent !== g; o.receiveShadow = true; } });
+    this.ringInt = buildRingInterior();
+    this.scene.add(this.ringInt);
+    this.decks.push(this.ringInt);
+    for (const g of this.decks) g.traverse((o) => { if (o.isMesh && !o.material.isMeshBasicMaterial && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } });
     this.stationId = null; this.station = null; this.earth = null;
+    this.fxItems = []; // tracers, missiles, flashes on the hull
+    this.buildFxPools();
+    this.tether = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(), V()]), new THREE.LineBasicMaterial({ color: 0xffe08a }));
+    this.tether.frustumCulled = false; this.scene.add(this.tether);
     this.setQuality('medium');
     this.buildHandItem();
     this.setupScreens();
@@ -162,17 +172,18 @@ export class World {
     this.camera.updateProjectionMatrix();
   }
   buildStars() {
-    const n = 3000, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    const n = 3500, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      const v = new THREE.Vector3().randomDirection().multiplyScalar(5000);
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(6000);
       pos.set([v.x, v.y, v.z], i * 3);
-      const t = Math.random(), b = 0.55 + Math.random() * 0.45;
+      const t = Math.random(), b = 0.5 + Math.random() * 0.5;
       col.set((t < 0.1 ? [1, 0.8, 0.6] : t < 0.2 ? [0.7, 0.8, 1] : [1, 1, 1]).map((c) => c * b), i * 3);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     this.stars = new THREE.Points(geo, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, sizeAttenuation: false }));
+    this.stars.frustumCulled = false;
     this.scene.add(this.stars);
     const glowTex = (inner, outer) => {
       const c = document.createElement('canvas'); c.width = c.height = 128;
@@ -190,131 +201,6 @@ export class World {
     this.battleFlash.scale.set(400, 400, 1);
     this.scene.add(this.battleFlash);
   }
-
-  // ---------- ISS-style interior deck ----------
-  buildDeck(d) {
-    const g = new THREE.Group();
-    g.position.y = d.id * DECK_H;
-    const accent = d.color, accHex = '#' + accent.toString(16).padStart(6, '0');
-    const add = (geo, m, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); g.add(o); return o; };
-    add(new THREE.CircleGeometry(ROOM_R + 0.3, SEG * 2), texMat(floorTex([7, 7])), 0, 0, 0, -Math.PI / 2);
-    add(new THREE.CircleGeometry(ROOM_R + 0.3, SEG * 2), mat(0xd6d2c6, { side: THREE.DoubleSide }), 0, ROOM_H, 0, Math.PI / 2);
-    add(new THREE.RingGeometry(ROOM_R - 1.42, ROOM_R - 1.3, 64), emis(accent, 0.55), 0, 0.01, 0, -Math.PI / 2);
-    // cable trays and ducting around the ceiling edge
-    add(new THREE.TorusGeometry(ROOM_R - 0.45, 0.07, 6, 64), mat(PAL.dark), 0, ROOM_H - 0.2, 0, Math.PI / 2);
-    add(new THREE.TorusGeometry(ROOM_R - 0.62, 0.05, 6, 64), mat(PAL.blue), 0, ROOM_H - 0.18, 0, Math.PI / 2);
-    add(new THREE.TorusGeometry(ROOM_R - 0.8, 0.14, 8, 64), mat(0xbfbab0), 0, ROOM_H - 0.32, 0, Math.PI / 2);
-
-    const segW = 2 * ROOM_R * Math.sin(Math.PI / SEG) + 0.05;
-    const apo = ROOM_R * Math.cos(Math.PI / SEG);
-    const wallMat = texMat(rackTex([1, 1])), frameMat = mat(PAL.off), railMat = mat(PAL.rail);
-    const glass = new THREE.MeshLambertMaterial({ color: 0x9fbbd8, transparent: true, opacity: 0.12, depthWrite: false });
-    const bagMat = texMat(mliTex([1, 1], '#d8cdb2')), strap = mat(PAL.blue);
-    const busy = [...COMP_IDS.filter((id) => !COMPS[id].ext && COMPS[id].deck === d.id).map((id) => COMPS[id].a), ...LOCKERS.filter((l) => l.deck === d.id).map((l) => l.a), ...(d.id === AIRLOCK.deck ? [AIRLOCK.a] : []), ...(d.id === SHELTER.deck ? [SHELTER.a] : [])];
-    const near = (a) => busy.some((b) => Math.abs(((a - b + 540) % 360) - 180) < 26);
-    for (let i = 0; i < SEG; i++) {
-      const aDeg = (i + 0.5) * (360 / SEG);
-      const p = polar(aDeg, apo);
-      const isWindow = d.id === 4 && (aDeg < 70 || aDeg > 290);
-      const isPort = d.id === 3 && (aDeg > 100 && aDeg < 125);
-      const w = new THREE.Group();
-      w.position.set(p.x, 0, p.z); w.rotation.y = -(aDeg * Math.PI) / 180;
-      if (isWindow || isPort) {
-        const bot = new THREE.Mesh(new THREE.BoxGeometry(segW, 1.0, 0.25), frameMat); bot.position.y = 0.5; w.add(bot);
-        const top = new THREE.Mesh(new THREE.BoxGeometry(segW, 0.7, 0.25), frameMat); top.position.y = ROOM_H - 0.35; w.add(top);
-        const gl = new THREE.Mesh(new THREE.PlaneGeometry(segW, ROOM_H - 1.7), glass); gl.position.set(0, 1.0 + (ROOM_H - 1.7) / 2, 0); w.add(gl);
-        const mull = new THREE.Mesh(new THREE.BoxGeometry(0.12, ROOM_H - 1.7, 0.2), frameMat); mull.position.y = 1.0 + (ROOM_H - 1.7) / 2; w.add(mull);
-      } else {
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(segW, ROOM_H, 0.25), wallMat); wall.position.y = ROOM_H / 2; w.add(wall);
-        if (!near(aDeg) && (i + d.id) % 3 !== 1) { // stowage bags strapped to the racks
-          for (let k = 0; k < 2 + (i % 2); k++) {
-            const b = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.5, 0.45), bagMat); b.position.set(-1.1 + k * 0.85, 0.27 + (k === 2 ? 0.5 : 0), 0.36); b.rotation.y = (k - 1) * 0.06; w.add(b);
-            const s = new THREE.Mesh(new THREE.BoxGeometry(0.77, 0.05, 0.03), strap); s.position.set(b.position.x, b.position.y + 0.08, 0.6); w.add(s);
-          }
-        }
-      }
-      // handrail (ISS yellow-gold) along each wall segment
-      const hr = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, segW * 0.8, 6), railMat); hr.rotation.z = Math.PI / 2; hr.position.set(0, 1.15, 0.24); w.add(hr);
-      for (const x of [-segW * 0.38, segW * 0.38]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.12), railMat); st.position.set(x, 1.15, 0.18); w.add(st); }
-      // rack-edge ribs
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.2, ROOM_H, 0.35), mat(0xb9b5aa));
-      const rp = polar(i * (360 / SEG), ROOM_R - 0.12); rib.position.set(rp.x, ROOM_H / 2, rp.z); rib.rotation.y = -(i * 2 * Math.PI) / SEG;
-      g.add(rib);
-      g.add(w);
-      // ceiling light units
-      const lp = polar(aDeg, ROOM_R - 3.5);
-      const housing = add(new THREE.BoxGeometry(1.3, 0.08, 0.5), mat(PAL.grey), lp.x, ROOM_H - 0.04, lp.z, 0, -(aDeg * Math.PI) / 180);
-      const lamp = add(new THREE.PlaneGeometry(1.15, 0.36), emis(0xf4f2ea, 0.95), lp.x, ROOM_H - 0.09, lp.z, Math.PI / 2, 0, (aDeg * Math.PI) / 180);
-      lamp.userData.lamp = true;
-    }
-    // lift shaft
-    add(new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, ROOM_H, 24), texMat(mliTex([3, 1], '#e4e1d8')), 0, ROOM_H / 2, 0);
-    for (const y of [0.05, ROOM_H - 0.05]) add(new THREE.TorusGeometry(SHAFT_R + 0.02, 0.06, 6, 24), mat(PAL.grey), 0, y, 0, Math.PI / 2);
-    const lp = polar(LIFT_A, SHAFT_R + 0.02), lr = -(LIFT_A * Math.PI) / 180;
-    add(new THREE.BoxGeometry(1.25, 2.3, 0.1), mat(PAL.grey), lp.x, 1.15, lp.z, 0, lr);
-    add(new THREE.BoxGeometry(0.04, 2.2, 0.12), mat(PAL.dark), lp.x, 1.15, lp.z, 0, lr);
-    add(new THREE.BoxGeometry(1.45, 0.1, 0.14), emis(accent, 1), lp.x, 2.36, lp.z, 0, lr);
-    const sign = planeLabel(d.full, 2.9, 0.42, { size: 54, accent: accHex });
-    const sp = polar(LIFT_A, SHAFT_R + 0.06);
-    sign.position.set(sp.x, 2.85, sp.z); sign.rotation.y = Math.PI - (LIFT_A * Math.PI) / 180; g.add(sign);
-    const sign2 = sign.clone(); const sp2 = polar(LIFT_A + 180, SHAFT_R + 0.06);
-    sign2.position.set(sp2.x, 2.85, sp2.z); sign2.rotation.y = Math.PI - ((LIFT_A + 180) * Math.PI) / 180; g.add(sign2);
-    const liftLabel = textSprite('LIFT', { width: 0.6, size: 30 }); liftLabel.position.set(polar(LIFT_A, SHAFT_R + 0.5).x, 2.6, polar(LIFT_A, SHAFT_R + 0.5).z); g.add(liftLabel);
-
-    // emergency locker: red ISS-style emergency stowage with PFE extinguishers and a portable breathing apparatus
-    const lk = LOCKERS.find((l) => l.deck === d.id);
-    const lkp = polar(lk.a, lk.r);
-    const locker = new THREE.Group();
-    const lb = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.6), mat(0xc0392b)); lb.position.y = 1.1; locker.add(lb);
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.5), new THREE.MeshBasicMaterial({ color: 0xffffff })); panel.position.set(0, 1.7, 0.31); locker.add(panel);
-    const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.1), emis(0xc0392b)); cross.position.set(0, 1.7, 0.315); locker.add(cross);
-    const cross2 = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.3), emis(0xc0392b)); cross2.position.set(0, 1.7, 0.315); locker.add(cross2);
-    for (let i = 0; i < 2; i++) { const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.6, 10), mat(0xd8d8d0)); ex.position.set(-0.3 + i * 0.6, 0.6, 0.4); locker.add(ex); const n = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.15, 6), mat(PAL.black)); n.position.set(-0.3 + i * 0.6, 0.97, 0.4); locker.add(n); }
-    const suitHang = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.15), mat(0xf2f1ec)); suitHang.position.set(0, 1.1, 0.38); locker.add(suitHang);
-    locker.position.set(lkp.x, 0, lkp.z); locker.rotation.y = -(lk.a * Math.PI) / 180;
-    g.add(locker);
-    const ll = textSprite('EMERGENCY LOCKER', { width: 1.5, size: 26, color: '#ffd0d0' }); ll.position.set(lkp.x * 0.97, 2.55, lkp.z * 0.97); g.add(ll);
-
-    // storm shelter: crew quarters walled with water bags
-    if (d.id === SHELTER.deck) {
-      const c = polar(SHELTER.a, SHELTER.r);
-      add(new THREE.CylinderGeometry(SHELTER.rad, SHELTER.rad, ROOM_H, 16, 1, true), new THREE.MeshLambertMaterial({ color: 0x4a7ab8, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }), c.x, ROOM_H / 2, c.z);
-      for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; if (Math.abs(a - Math.PI * 0.75) < 0.6) continue; add(new THREE.BoxGeometry(0.9, 1.2, 0.35), texMat(mliTex([1, 1], '#b9cde0')), c.x + Math.cos(a) * SHELTER.rad, 0.6, c.z + Math.sin(a) * SHELTER.rad, 0, -a + Math.PI / 2); }
-      add(new THREE.CircleGeometry(SHELTER.rad, 20), emis(0x2050a0, 0.5), c.x, 0.02, c.z, -Math.PI / 2);
-      const sl = textSprite('STORM SHELTER (water-walled)', { width: 2.2, size: 26, color: '#bcd8ff' }); sl.position.set(c.x, 2.9, c.z); g.add(sl);
-    }
-    // cargo deck: CTB bag stacks and the inner airlock hatch
-    if (d.id === AIRLOCK.deck) {
-      for (let i = 0; i < 6; i++) { const cp = polar(150 + i * 9, 9.6 - (i % 2) * 0.9); add(new THREE.BoxGeometry(0.9, 0.7, 0.7), bagMat, cp.x, 0.35 + (i > 3 ? 0.7 : 0), cp.z, 0, i); }
-      const ap = polar(AIRLOCK.a, ROOM_R - 0.3), ar = -(AIRLOCK.a * Math.PI) / 180;
-      add(new THREE.BoxGeometry(2.2, 2.7, 0.3), mat(PAL.off), ap.x, 1.35, ap.z, 0, ar);
-      add(new THREE.BoxGeometry(1.4, 1.9, 0.12), mat(0xe8e6df), ap.x * 0.985, 1.25, ap.z * 0.985, 0, ar);
-      add(new THREE.CircleGeometry(0.22, 16), emis(0x80a0c0, 0.5), ap.x * 0.975, 1.65, ap.z * 0.975, 0, Math.PI + ar);
-      add(new THREE.BoxGeometry(1.6, 0.08, 0.16), mat(PAL.rail), ap.x * 0.98, 2.25, ap.z * 0.98, 0, ar);
-      const at = textSprite('AIRLOCK → EVA', { width: 1.2, size: 28 }); at.position.set(ap.x * 0.95, 2.9, ap.z * 0.95); g.add(at);
-    }
-
-    // components
-    for (const id of COMP_IDS) {
-      const c = COMPS[id];
-      if (c.ext || c.deck !== d.id) continue;
-      const built = buildComp(c.mesh, accent);
-      const p = polar(c.a, c.r);
-      built.group.position.set(p.x, 0, p.z);
-      built.group.rotation.y = -(c.a * Math.PI) / 180;
-      g.add(built.group);
-      const label = textSprite(c.name, { width: Math.min(1.9, 0.065 * c.name.length + 0.3), size: 30 });
-      label.position.set(p.x * 0.97, Math.min(ROOM_H - 0.35, Math.max(2.6, built.height + 0.45)), p.z * 0.97);
-      g.add(label);
-      const fire = buildFire();
-      const fp2 = polar(c.a, c.r - c.fp * 0.75);
-      fire.position.set(fp2.x, 0, fp2.z); fire.rotation.y = -(c.a * Math.PI) / 180;
-      g.add(fire);
-      this.comps[id] = { ...built, fire, label };
-    }
-    this.scene.add(g);
-    this.decks.push(g);
-  }
   setupScreens() {
     for (const id in this.comps) {
       const v = this.comps[id];
@@ -323,7 +209,7 @@ export class World {
       const W = 400, H = Math.max(120, Math.round(W / (p.width / p.height)));
       const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
       const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-      v.screen.material.map = tex; v.screen.material.color.setHex(0xffffff); v.screen.material.needsUpdate = true;
+      v.screen.material = v.screen.material.clone(); v.screen.material.map = tex; v.screen.material.color.setHex(0xffffff); v.screen.material.needsUpdate = true;
       v.canvas = cv; v.tex = tex;
       drawScreen(cv, { title: COMPS[id].name.toUpperCase(), lines: [['BOOT', 'OK']] }, 'ok', 0);
       v.extras = (v.group.userData.extras || []).map((mesh, k) => {
@@ -342,7 +228,6 @@ export class World {
       if (dist > 16) continue;
       const c = S.comps[id];
       const st = c.hp <= 0 ? 'dead' : !c.on || c.pw <= 0 ? 'off' : c.fire > 0 ? 'fire' : COMPS[id].computer && c.fault ? 'fault' : 'ok';
-      // power-on detection: the first time a screen is seen, or when it comes back from dark, it boots
       const live = st !== 'off' && st !== 'dead';
       if (v.wasLive === undefined) { v.wasLive = live; if (live) { v.bootAt = now + Math.random() * 1.6; v.bootSnd = false; } }
       else if (live && !v.wasLive) { v.bootAt = now + Math.random() * 0.8; v.bootSnd = false; }
@@ -406,22 +291,42 @@ export class World {
     this.camera.add(this.hand);
   }
 
+  // ---------------- spaces: where a (deck, x, y, z) is in the scene ----------------
+  // returns world position for a point in a space; for the ring also the frame quaternion
+  spacePos(deck, x, y, z, out = new THREE.Vector3()) {
+    if (deck === RING_DECK) { const th = -z / RING.R, rr = RING.R - y; return out.set(x, -rr * Math.cos(th), -rr * Math.sin(th)).add(RING_CENTER); }
+    if (deck === EXT_DECK) return out.set(x, y, z).add(this.exterior.position);
+    return out.set(x, deck * DECK_H + y, z);
+  }
+  spaceQuat(deck, z, out = new THREE.Quaternion()) {
+    if (deck === RING_DECK) return out.setFromAxisAngle(XAX, -z / RING.R);
+    return out.identity();
+  }
+
   // ---------------- per-frame update ----------------
-  update(S, me, dt, now) {
+  update(S, me, dt, now, ctl) {
     if (!S || !me) return;
     const deck = me.deck;
-    this.decks.forEach((g, i) => { g.visible = i === deck; });
-    const baseY = deck * DECK_H;
-    const bob = me.moving ? Math.sin(now * 9) * 0.035 : 0;
+    const r = Math.hypot(me.x, me.z);
+    const nearTrunk = deck <= 4 && r < 6.5;
+    this.decks.forEach((g, i) => { g.visible = i === deck || (nearTrunk && i <= 4 && Math.abs(i - deck) === 1); });
+    const walking = ctl ? !ctl.fl : true;
+    const bob = me.moving && walking && (me.y || 0) < 0.05 ? Math.sin(now * 9) * 0.035 : 0;
     const crouch = me.state === 'downed' ? -1.2 : 0;
-    this.camera.position.set(me.x, baseY + EYE + bob + crouch, me.z);
-    this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.set(me.pitch, me.yaw, me.state === 'downed' ? 0.6 : 0);
+    const cam = this.camera;
+    const yawPitch = new THREE.Quaternion().setFromEuler(new THREE.Euler(me.pitch, me.yaw, me.state === 'downed' ? 0.6 : 0, 'YXZ'));
+    this.spacePos(deck, me.x, (me.y || 0) + EYE + bob + crouch, me.z, cam.position);
+    if (deck === RING_DECK) {
+      const G = ctl && ctl.gm !== undefined ? [S.drive.g * G0, -(S.ring ? S.ring.g : 0) * G0] : [0, -1];
+      const tilt = Math.abs(G[1]) > 0.3 || Math.abs(G[0]) > 0.3 ? Math.atan2(G[0], Math.abs(G[1]) + 1e-3) : 0;
+      this.ringTilt = (this.ringTilt || 0) + (tilt - (this.ringTilt || 0)) * Math.min(1, dt * 2);
+      cam.quaternion.copy(this.spaceQuat(deck, me.z)).multiply(new THREE.Quaternion().setFromAxisAngle(ZAX, this.ringTilt)).multiply(yawPitch);
+    } else cam.quaternion.copy(yawPitch);
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 2.5);
       const s = this.shake * 0.08;
-      this.camera.position.x += (Math.random() - 0.5) * s; this.camera.position.y += (Math.random() - 0.5) * s;
-      this.camera.rotation.z += (Math.random() - 0.5) * s * 0.5;
+      cam.position.x += (Math.random() - 0.5) * s; cam.position.y += (Math.random() - 0.5) * s;
+      cam.rotateZ((Math.random() - 0.5) * s * 0.5);
     }
     const prevNow = this._fnow; this._fnow = now;
     if (this.focus) {
@@ -431,39 +336,42 @@ export class World {
       else {
         const t = this.focusT, e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const pose = this.focusPose(this.comps[this.focus].screen);
-        this.camera.position.lerp(pose.pos, e);
-        this.camera.quaternion.slerp(pose.quat, e);
+        cam.position.lerp(pose.pos, e);
+        cam.quaternion.slerp(pose.quat, e);
       }
     }
+    const cp = cam.position;
+    const eva = deck === EXT_DECK, ring = deck === RING_DECK;
+    const baseY = deck <= 4 ? deck * DECK_H : cp.y;
     this.key.position.set(0, baseY + ROOM_H - 0.15, 0); this.key.target.position.set(0, baseY, 0);
-    this.sunlight.position.set(me.x - 60, baseY + 70, me.z + 40); this.sunlight.target.position.set(me.x, baseY, me.z);
-    this.point.position.set(0, baseY + ROOM_H - 0.4, 0);
-    this.point2.position.set(-Math.sin(me.yaw) * 4, baseY + ROOM_H - 0.5, -Math.cos(me.yaw) * 4);
+    this.sunlight.position.set(cp.x - 70, cp.y + 80, cp.z + 45); this.sunlight.target.position.copy(cp);
+    if (ring) { const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.spaceQuat(deck, me.z)); this.point.position.copy(cp).addScaledVector(up, 1.6); this.point2.position.copy(cp).addScaledVector(up, 1.2).add(new THREE.Vector3(0, 0, 0).set(-Math.sin(me.yaw) * 4, 0, 0)); }
+    else { this.point.position.set(0, baseY + ROOM_H - 0.4, 0); this.point2.position.set(cp.x - Math.sin(me.yaw) * 4, baseY + ROOM_H - 0.5, cp.z - Math.cos(me.yaw) * 4); }
     const red = S.alert === 'red', yel = S.alert === 'yellow';
     const pulse = 0.5 + 0.5 * Math.sin(now * 4);
     const blackout = S.power && S.power.gen <= 0 && S.battery.charge <= 0.01;
     const powerDim = blackout ? 0.22 : 1;
     const lc = blackout ? new THREE.Color(1, 0.42, 0.22) : red ? new THREE.Color(1, 0.35 + 0.3 * (1 - pulse), 0.3 + 0.3 * (1 - pulse)) : yel ? new THREE.Color(1, 0.93, 0.78) : new THREE.Color(1, 0.99, 0.96);
-    const eva = deck === EXT_DECK;
-    this.point.color.copy(lc); this.point.intensity = eva ? 0 : 26 * powerDim;
+    this.point.color.copy(lc); this.point.intensity = eva ? 0 : (ring ? 30 : 26) * powerDim;
     this.point2.color.copy(lc); this.point2.intensity = eva ? 0 : 12 * powerDim;
-    this.key.color.copy(lc); this.key.intensity = eva ? 0 : 55 * powerDim;
-    this.hemi.intensity = eva ? 0.25 : 0.75 * powerDim;
+    this.key.color.copy(lc); this.key.intensity = eva || ring ? 0 : 55 * powerDim;
+    this.hemi.intensity = eva ? 0.22 : (ring ? 0.9 : 0.75) * powerDim;
     this.scene.environmentIntensity = eva ? 0.35 : 0.6 * powerDim;
-    this.sunlight.intensity = eva ? 3.2 : 0;
-    if (eva) this.updateExterior(S, now, dt);
-    this.decks[deck].traverse((o) => { if (o.userData.lamp) o.material.color.setRGB(lc.r * 0.95 * powerDim, lc.g * 0.95 * powerDim, lc.b * 0.95 * powerDim); });
+    this.sunlight.intensity = eva ? 3.4 : 0;
+    this.updateExterior(S, now, dt);
+    const lampCol = new THREE.Color(lc.r * 0.95 * powerDim, lc.g * 0.95 * powerDim, lc.b * 0.95 * powerDim);
+    for (const g of this.decks) if (g.visible && g !== this.exterior) g.traverse((o) => { if (o.userData.lamp) o.material.color.copy(lampCol); });
 
-    // sky: stars, sun, destination, nearby planet or moon
-    this.stars.position.set(me.x, baseY, me.z);
+    // sky: stars, sun, destination, nearby planet or moon (all "at infinity" around the camera)
+    this.stars.position.copy(cp);
     const N = S.nav;
     const leg = Math.min(N.leg + (N.state === 'docked' ? 0 : 1), WAYPOINTS.length - 1);
     const f = N.state === 'transit' ? Math.min(1, N.x / N.L) : 1;
     const distAU = Math.max(0.01, Math.hypot(WAYPOINTS[leg].pos[0] - WAYPOINTS[N.leg].pos[0], WAYPOINTS[leg].pos[1] - WAYPOINTS[N.leg].pos[1]) * (1 - f));
-    this.dest.position.set(me.x, baseY + 300, me.z - 3000);
+    this.dest.position.set(cp.x, cp.y + 300, cp.z - 3000);
     const ds = Math.min(700, 40 / distAU);
     this.dest.scale.set(ds, ds, 1);
-    this.sun.position.set(me.x - 2600, baseY + 900, me.z + 1500);
+    this.sun.position.set(cp.x - 2600, cp.y + 900, cp.z + 1500);
     let pk = null;
     if (N.state === 'docked') pk = WAYPOINTS[N.leg].id;
     else if (N.state !== 'transit') pk = WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
@@ -476,24 +384,22 @@ export class World {
       if (pk) { this.planet = buildPlanet(pk); this.planet.scale.setScalar(pk === 'ganymede' ? 2600 : 1500); this.scene.add(this.planet); }
       if (pk === 'luna') { this.earth = buildPlanet('earth'); this.earth.scale.setScalar(260); this.scene.add(this.earth); }
     }
-    const sunDir = new THREE.Vector3(-2600, 900, 1500).normalize();
-    if (this.planet) { this.planet.position.set(me.x - 2600, baseY - 900, me.z - 2200); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); }
-    if (this.earth) { this.earth.position.set(me.x + 1500, baseY + 600, me.z - 3600); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); }
+    this.placeSky(cp, now);
     this.updateStation(S, now);
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.5);
     this.battleFlash.material.opacity = this.flash;
-    this.battleFlash.position.set(me.x + Math.sin(now) * 1200, baseY + 200, me.z - 2500);
+    this.battleFlash.position.set(cp.x + Math.sin(now) * 1200, cp.y + 200, cp.z - 2500);
 
     // components
     for (const id in this.comps) {
       const v = this.comps[id], c = S.comps[id];
-      if (!c || compDeck(id) !== deck) continue;
-      const lp = v.label.position;
-      v.label.visible = Math.hypot(lp.x - me.x, lp.z - me.z) > 3.2;
+      if (!c) continue;
+      const onDeck = compDeck(id) === deck;
+      if (v.label) { const lp = v.label.position; v.label.visible = onDeck && Math.hypot(lp.x - me.x, lp.z - me.z) > 3.2; }
       const hp = c.hp;
       const col = hp <= 0 ? 0x111111 : c.fire > 0 ? (Math.sin(now * 12) > 0 ? 0xff3010 : 0x401000) : c.fault ? 0xff40ff : hp < 25 ? 0xff3030 : hp < 60 ? 0xffb020 : 0x40ff80;
-      v.light.material.color.setHex(col);
-      if (!v.fire) continue;
+      if (v.light) v.light.material.color.setHex(col);
+      if (!v.fire || !onDeck) continue;
       v.fire.visible = c.fire > 0.02;
       if (v.fire.visible) {
         const s = 0.5 + c.fire * 1.3;
@@ -509,10 +415,7 @@ export class World {
       g.material.color.setRGB((unstable ? 1 : 0.55) * k, (unstable ? 0.4 : 0.85) * k, 1 * k);
       g.scale.setScalar(0.9 + 0.1 * Math.sin(now * (unstable ? 20 : 3)));
     }
-    if (this.comps.drivecore && deck === 0) {
-      const g = this.comps.drivecore.glow, t = S.drive.ignited ? 0.3 + S.drive.throttle : 0.05;
-      g.material.color.setRGB(t, t * 0.6, t * 0.3);
-    }
+    if (this.comps.drivecore && deck === 0) { const g = this.comps.drivecore.glow, t = S.drive.ignited ? 0.3 + S.drive.throttle : 0.05; g.material.color.setRGB(t, t * 0.6, t * 0.3); }
     if (this.comps.fabricator && deck === 1) { const g = this.comps.fabricator.glow; g.visible = S.fab.queue.length > 0; g.rotation.y += dt * 3; }
     if (this.comps.cryo && deck === 3) this.comps.cryo.group.children.forEach((ch) => { if (ch.userData.pod !== undefined) ch.material.color.setHex(ch.userData.pod < S.pods ? 0x4aa0d8 : 0x101418); });
     if (this.comps.helm && deck === 4) {
@@ -525,14 +428,29 @@ export class World {
 
     this.scrT -= dt;
     if (this.scrT <= 0) { this.scrT = 0.5; this.drawScreens(S, me, now); }
-    else this.drawScreens(S, me, now, true); // booting screens animate every frame
+    else this.drawScreens(S, me, now, true);
     this.updateBreaches(S, deck, now);
     this.updateItems(S, deck);
     this.updateAvatars(S, me, deck, dt, now);
+    // EVA safety tether from the hatch to your harness
+    this.tether.visible = eva && !this.focus;
+    if (this.tether.visible) {
+      const a = this.spacePos(EXT_DECK, EXT.hatch.x + 0.3, EXT.hatch.y, EXT.hatch.z), b = cp.clone().add(new THREE.Vector3(0, -0.6, 0).applyQuaternion(cam.quaternion)).add(new THREE.Vector3(0.15, 0, 0).applyQuaternion(cam.quaternion));
+      const mid = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, -Math.min(4, a.distanceTo(b) * 0.06), 0));
+      const pts = []; for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push(new THREE.Vector3().copy(a).multiplyScalar((1 - t) * (1 - t)).addScaledVector(mid, 2 * t * (1 - t)).addScaledVector(b, t * t)); }
+      this.tether.geometry.setFromPoints(pts);
+    }
     if (me.item && !this.focus) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
     else this.hand.visible = false;
   }
-  // Station visible from the hull during approach / docked (in the ship's body frame; our port is at the bow)
+  placeSky(cp, now) {
+    const sunDir = new THREE.Vector3(-2600, 900, 1500).normalize();
+    if (this.planet) { this.planet.position.set(cp.x - 2600, cp.y - 900, cp.z - 2200); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); }
+    if (this.earth) { this.earth.position.set(cp.x + 1500, cp.y + 600, cp.z - 3600); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); }
+    this.stars.position.copy(cp);
+    this.sun.position.set(cp.x - 2600, cp.y + 900, cp.z + 1500);
+  }
+  // Station visible from the hull and cameras during approach / docked (ship body frame; our port is at the bow)
   updateStation(S, now) {
     const N = S.nav;
     const near = N.state === 'orbit' || N.state === 'approach' || N.state === 'docking' || N.state === 'docked';
@@ -543,7 +461,7 @@ export class World {
       if (this.station) { this.station.traverse((o) => { if (o.isMesh && o.material && !o.material.isMeshBasicMaterial) o.castShadow = o.receiveShadow = true; }); this.exterior.add(this.station); }
     }
     if (!this.station) return;
-    const PORT = new THREE.Vector3(0, -12, -89.5);
+    const PORT = new THREE.Vector3(...SL.bowPort);
     const q = new THREE.Quaternion(...(S.att.q || [0, 0, 0, 1])), qi = q.clone().invert();
     let rel = new THREE.Vector3(0, 0, -2000);
     if (N.state === 'approach' && S.prox) rel = new THREE.Vector3(-S.prox.p[0], -S.prox.p[1], -S.prox.p[2]);
@@ -552,24 +470,187 @@ export class World {
     this.station.quaternion.copy(qi);
     this.station.userData.tick(now);
   }
+
+  // ---------------- hull animation and weapon effects ----------------
+  buildFxPools() {
+    // tracers: one LineSegments buffer of short streaks
+    this.trMax = 900;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.trMax * 6), 3));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.trMax * 6), 3));
+    this.tracerMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.tracerMesh.frustumCulled = false; this.exterior.add(this.tracerMesh);
+    const hg = new THREE.BufferGeometry(); // bright heads so each round reads at any distance (lines are only 1 px)
+    hg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.trMax * 3), 3));
+    hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.trMax * 3), 3));
+    this.tracerHeads = new THREE.Points(hg, new THREE.PointsMaterial({ size: 3.5, sizeAttenuation: false, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.tracerHeads.frustumCulled = false; this.exterior.add(this.tracerHeads);
+    this.tracers = [];
+    this.missiles = [];
+    this.flashMat = new THREE.SpriteMaterial({ map: flashTex(), color: 0xffd090, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+    this.sprites = [];
+  }
+  sprite(color, scale) {
+    let s = this.sprites.find((x) => !x.visible);
+    if (!s) { s = new THREE.Sprite(this.flashMat.clone()); this.exterior.add(s); this.sprites.push(s); }
+    s.material.color.setHex(color); s.material.opacity = 1; s.scale.setScalar(scale); s.visible = true; return s;
+  }
+  // direction from an inertial bearing to the ship frame
+  bodyDir(S, dir) { const b = qrot(qconj(S.att.q || [0, 0, 0, 1]), dir || [0, 0, -1]); return new THREE.Vector3(b[0], b[1], b[2]).normalize(); }
+  onFx(f) {
+    if (!this._S) return;
+    const S = this._S;
+    if (f.type === 'srm') {
+      const L = this.comps.launcher; if (!L) return;
+      const tdir = this.bodyDir(S, f.dir);
+      for (let i = 0; i < (f.n || 1); i++) {
+        const lid = L.lids[(8 - (S.weap.cells + i + 1) + 64) % 8];
+        lid.userData.open = 1.6 + i * 0.25;
+        const p = new THREE.Vector3(); lid.getWorldPosition(p); this.exterior.worldToLocal(p);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(L.group.quaternion);
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.2, 10), mat(0xe8e6df)); m.add(Object.assign(new THREE.Sprite(this.flashMat.clone()), {}));
+        m.children[0].position.y = -1.3; m.children[0].scale.setScalar(1.8); m.children[0].material.color.setHex(0xffc070);
+        m.position.copy(p); this.exterior.add(m);
+        this.missiles.push({ m, t: -i * 0.25, v: up.clone().multiplyScalar(12), up, tdir });
+        m.visible = false;
+      }
+    } else if (f.type === 'pdc') {
+      this.pdcDir = f.dir ? this.bodyDir(S, f.dir) : null;
+    } else if (f.type === 'rail') {
+      const mz = this.exterior.userData.railMuzzle; if (!mz) return;
+      const s = this.sprite(0xbfe0ff, 9); s.position.copy(mz.position); s.userData.life = 0.35; s.userData.t = 0;
+      for (let i = 0; i < 6; i++) this.addTracer(mz.position.clone(), new THREE.Vector3(0, 0, -1), 4000, 30, 0.6, [0.7, 0.85, 1]);
+    } else if (f.type === 'launch') {
+      const L = this.comps.launcher; if (!L) return;
+      this.onFx({ type: 'srm', n: 1, dir: f.dir });
+    }
+  }
+  addTracer(p, dir, speed, len, life, col) {
+    if (this.tracers.length >= this.trMax) this.tracers.shift();
+    this.tracers.push({ p, d: dir, s: speed, len, life, t: 0, col });
+  }
   updateExterior(S, now, dt) {
+    this._S = S;
+    const ex = this.exterior;
+    if (!ex.visible && !this.camActive) return;
+    // centrifuge ring
+    if (ex.userData.ring) ex.userData.ring.rotation.z = S.ring ? S.ring.spin : 0;
     const hf = Math.min(1, S.heat.stored / 30000);
     for (const id of ['radA', 'radB']) {
-      const w = this.comps[id].wing;
-      const target = S.heat.radExt && S.comps[id].hp > 0 ? 1 : 0.1;
-      w.scale.x += (target - w.scale.x) * Math.min(1, dt * 0.8);
+      const w = this.comps[id] && this.comps[id].wing; if (!w) continue;
+      const target = S.heat.radExt && S.comps[id].hp > 0 ? 1 : 0.12;
+      w.scale.y += (target - w.scale.y) * Math.min(1, dt * 0.8);
       w.userData.mat.emissive.setRGB(0.35 * hf * hf, 0.1 * hf * hf, 0.02 * hf);
     }
+    // gatlings: track the threat, spin up, fire tracers in long streams
+    const fire = (S.weap && S.weap.pdcFire) || [0, 0, 0];
+    ['pdc1', 'pdc2', 'pdc3'].forEach((id, i) => {
+      const v = this.comps[id]; if (!v || !v.gat) return;
+      const G = v.gat, alive = S.comps[id].hp > 0;
+      let aim = this.pdcDir || null;
+      if (!aim && S.enc) { const e = S.enc.enemies.find((x) => !x.dead && !x.gone); if (e) aim = this.bodyDir(S, e.dir); }
+      if (alive && aim) {
+        const inv = v.group.quaternion.clone().invert(), la = aim.clone().applyQuaternion(inv);
+        const yawT = Math.atan2(-la.x, -la.z), pitchT = Math.atan2(la.y, Math.hypot(la.x, la.z));
+        G.yaw.rotation.y += (yawT - G.yaw.rotation.y) * Math.min(1, dt * 3);
+        G.pitch.rotation.x += (Math.max(-0.2, pitchT) - G.pitch.rotation.x) * Math.min(1, dt * 3);
+      } else if (!S.enc) { G.yaw.rotation.y *= 1 - Math.min(1, dt * 0.5); G.pitch.rotation.x *= 1 - Math.min(1, dt * 0.5); }
+      const firing = alive && fire[i] > 0;
+      G.spin = (G.spin || 0) + ((firing ? 60 : 0) - (G.spin || 0)) * Math.min(1, dt * (firing ? 6 : 1.5));
+      G.barrels.rotation.z += G.spin * dt;
+      G.flash.visible = firing && Math.random() < 0.7;
+      if (G.flash.visible) G.flash.scale.setScalar(1.1 + Math.random() * 0.8);
+      if (firing) {
+        const n = Math.min(12, Math.max(1, Math.round(dt * 70)));
+        const mp = new THREE.Vector3(); G.flash.getWorldPosition(mp); ex.worldToLocal(mp);
+        const bd = new THREE.Vector3(0, 0, -1).applyQuaternion(G.barrels.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(ex.quaternion.clone().invert());
+        for (let k = 0; k < n; k++) { const d = bd.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.04)).normalize(); this.addTracer(mp.clone(), d, 420 + Math.random() * 60, 22, 1.6, Math.random() < 0.25 ? [1, 0.35, 0.2] : [1, 0.85, 0.45]); }
+      }
+    });
+    if (!fire.some((x) => x > 0)) this.pdcDir = null;
+    // launcher lids open briefly when a cell fires
+    const L = this.comps.launcher;
+    if (L && L.lids) for (const h of L.lids) { const o = h.userData.open || 0; h.userData.open = Math.max(0, o - dt); const tgt = o > 0 ? 1.9 : 0; h.rotation.z += (tgt * h.userData.side - h.rotation.z) * Math.min(1, dt * 8); }
+    // missiles: boost up out of the cell, pitch over toward the target, then streak away
+    for (const m of this.missiles) {
+      m.t += dt;
+      if (m.t < 0) continue;
+      m.m.visible = true;
+      if (m.t > 0.5) { const want = m.tdir.clone().multiplyScalar(200); m.v.lerp(want, Math.min(1, dt * (0.8 + m.t))); }
+      m.m.position.addScaledVector(m.v, dt);
+      m.m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), m.v.clone().normalize());
+      m.m.children[0].scale.setScalar(1.6 + Math.random() * 0.8);
+      if (Math.random() < 0.6) this.addTracer(m.m.position.clone(), m.v.clone().normalize().negate(), 5, 3, 1.2, [0.9, 0.9, 0.95]);
+    }
+    this.missiles = this.missiles.filter((m) => { if (m.t > 5) { ex.remove(m.m); m.m.geometry.dispose(); return false; } return true; });
+    // tracers buffer
+    const pos = this.tracerMesh.geometry.attributes.position.array, col = this.tracerMesh.geometry.attributes.color.array;
+    const hpos = this.tracerHeads.geometry.attributes.position.array, hcol = this.tracerHeads.geometry.attributes.color.array;
+    let n = 0;
+    for (const t of this.tracers) {
+      t.t += dt;
+      if (t.t > t.life) continue;
+      const head = t.p.clone().addScaledVector(t.d, t.s * t.t), tail = head.clone().addScaledVector(t.d, -Math.min(t.len, t.s * t.t));
+      const a = 1 - t.t / t.life;
+      pos.set([head.x, head.y, head.z, tail.x, tail.y, tail.z], n * 6);
+      hpos.set([head.x, head.y, head.z], n * 3); hcol.set([t.col[0] * a, t.col[1] * a, t.col[2] * a], n * 3);
+      col.set([t.col[0] * a, t.col[1] * a, t.col[2] * a, t.col[0] * a * 0.2, t.col[1] * a * 0.2, t.col[2] * a * 0.2], n * 6);
+      n++;
+    }
+    this.tracers = this.tracers.filter((t) => t.t <= t.life);
+    this.tracerMesh.geometry.setDrawRange(0, n * 2);
+    this.tracerMesh.geometry.attributes.position.needsUpdate = true; this.tracerMesh.geometry.attributes.color.needsUpdate = true;
+    this.tracerHeads.geometry.setDrawRange(0, n); this.tracerHeads.geometry.attributes.position.needsUpdate = true; this.tracerHeads.geometry.attributes.color.needsUpdate = true;
+    for (const s of this.sprites) if (s.visible) { s.userData.t = (s.userData.t || 0) + dt; s.material.opacity = Math.max(0, 1 - s.userData.t / (s.userData.life || 0.3)); if (s.userData.t > (s.userData.life || 0.3)) s.visible = false; }
+    // spinning kit, the plume, nav lights
     const combat = !!S.enc;
-    for (const id of ['pdc1', 'pdc2', 'pdc3']) { const s = this.comps[id].spin; if (s && S.comps[id].hp > 0) s.rotation.y = combat ? Math.sin(now * 1.7 + id.length) * 1.4 : s.rotation.y * 0.98; }
-    if (this.comps.antenna.spin) this.comps.antenna.spin.rotation.y = Math.sin(now * 0.05) * 0.4;
-    if (this.comps.sensorArray.spin && S.comps.sensorArray.hp > 0) this.comps.sensorArray.spin.rotation.y += dt * (S.sensors.pingT > 0 ? 8 : 1.2);
-    const rg = this.comps.railgun.glow; const ch = S.weap.rail;
-    rg.material.color.setRGB(0.1 + 0.4 * ch, 0.2 + 0.6 * ch, 0.4 + 0.6 * ch);
-    const pl = this.exterior.userData.plume;
-    pl.visible = S.drive.ignited && S.drive.throttle > 0.01;
-    if (pl.visible) { pl.scale.set(0.6 + S.drive.throttle, 0.4 + S.drive.throttle * 1.2, 0.6 + S.drive.throttle); pl.material.opacity = 0.35 + 0.15 * Math.sin(now * 30); }
+    if (this.comps.antenna && this.comps.antenna.spin) this.comps.antenna.spin.rotation.y = Math.sin(now * 0.05) * 0.4;
+    if (this.comps.sensorArray && this.comps.sensorArray.spin && S.comps.sensorArray.hp > 0) this.comps.sensorArray.spin.rotation.y += dt * (S.sensors.pingT > 0 ? 8 : combat ? 3 : 1.2);
+    if (this.comps.railgun && this.comps.railgun.glow) { const ch = S.weap.rail; this.comps.railgun.glow.material.color.setRGB(0.1 + 0.4 * ch, 0.2 + 0.6 * ch, 0.4 + 0.6 * ch); }
+    const mz = ex.userData.railMuzzle; if (mz) { const ch = S.weap.rail; mz.material.color.setRGB(0.1 + 0.5 * ch, 0.2 + 0.7 * ch, 0.5 + 0.5 * ch); }
+    const pl = ex.userData.plume;
+    pl.visible = S.drive.ignited && S.drive.throttle > 0.01; pl.userData.core.visible = pl.visible;
+    if (pl.visible) { pl.scale.set(0.6 + S.drive.throttle, 0.4 + S.drive.throttle * 1.2, 0.6 + S.drive.throttle); pl.material.opacity = 0.35 + 0.15 * Math.sin(now * 30); pl.userData.core.material.opacity = 0.5 + 0.2 * Math.sin(now * 47); }
+    const ch = ex.userData.chamber; if (ch) { const k = S.drive.ignited ? 1.2 + S.drive.throttle : 0.25; ch.material.color.setRGB(0.6 * k, 0.48 * k, 1 * k); }
+    for (const l of ex.userData.navs || []) if (l.userData.blink) l.visible = (now % 1.6) < 0.12;
+    if (ex.userData.ring) ex.userData.ring.traverse((o) => { if (o.userData.blink) o.visible = (now % 2.0) < 0.15; });
   }
+
+  // ---------------- external cameras: rendered into a console canvas with the main renderer ----------------
+  renderExtCam(S, idx, canvas, now) {
+    const C = EXT_CAMS[((idx % EXT_CAMS.length) + EXT_CAMS.length) % EXT_CAMS.length];
+    if (!this.extCam) this.extCam = new THREE.PerspectiveCamera(55, 16 / 9, 0.1, 9000);
+    const cam = this.extCam, ex = this.exterior;
+    const w = canvas.width, h = canvas.height;
+    cam.fov = C.fov; cam.aspect = w / h; cam.updateProjectionMatrix();
+    cam.position.set(...C.pos).add(ex.position);
+    cam.lookAt(new THREE.Vector3(...C.look).add(ex.position));
+    cam.position.add(new THREE.Vector3((Math.random() - 0.5) * 0.004, (Math.random() - 0.5) * 0.004, 0));
+    // swap in exterior lighting and visibility, render a small viewport, copy it out, restore
+    const vis = this.decks.map((g) => g.visible); this.decks.forEach((g) => (g.visible = g === ex));
+    const L = [this.point.intensity, this.point2.intensity, this.key.intensity, this.hemi.intensity, this.scene.environmentIntensity, this.sunlight.intensity];
+    this.point.intensity = 0; this.point2.intensity = 0; this.key.intensity = 0; this.hemi.intensity = 0.22; this.scene.environmentIntensity = 0.35; this.sunlight.intensity = 3.4;
+    const sp = this.sunlight.position.clone(), st = this.sunlight.target.position.clone();
+    this.sunlight.position.set(ex.position.x - 70, ex.position.y + 80, ex.position.z + 45 - 30); this.sunlight.target.position.set(ex.position.x, ex.position.y, ex.position.z - 30);
+    const tv = this.tether.visible; this.tether.visible = false;
+    const hv = this.hand.visible; this.hand.visible = false;
+    this.camActive = true; this.updateExterior(S, now, 0); this.camActive = false;
+    this.placeSky(cam.position, now);
+    const r = this.renderer, size = r.getSize(new THREE.Vector2()), pr = r.getPixelRatio();
+    const vw = Math.min(size.x, w / pr), vh = Math.min(size.y, h / pr);
+    r.setScissorTest(true); r.setViewport(0, size.y - vh, vw, vh); r.setScissor(0, size.y - vh, vw, vh);
+    r.render(this.scene, cam);
+    const g2 = canvas.getContext('2d');
+    g2.drawImage(r.domElement, 0, 0, vw * pr, vh * pr, 0, 0, w, h);
+    r.setScissorTest(false); r.setViewport(0, 0, size.x, size.y);
+    this.decks.forEach((g, i) => (g.visible = vis[i]));
+    [this.point.intensity, this.point2.intensity, this.key.intensity, this.hemi.intensity, this.scene.environmentIntensity, this.sunlight.intensity] = L;
+    this.sunlight.position.copy(sp); this.sunlight.target.position.copy(st);
+    this.tether.visible = tv; this.hand.visible = hv;
+    this.placeSky(this.camera.position, now);
+    return C;
+  }
+
   updateBreaches(S, deck, now) {
     const seen = new Set();
     for (const b of S.breaches) {
@@ -608,7 +689,8 @@ export class World {
         this.scene.add(m);
         this.itemMeshes[it.id] = m;
       }
-      m.position.set(it.x, it.deck * DECK_H + 0.15, it.z);
+      this.spacePos(it.deck, it.x, (it.y || 0) + 0.15, it.z, m.position);
+      this.spaceQuat(it.deck, it.z, m.quaternion);
       m.visible = it.deck === deck;
     }
     for (const id in this.itemMeshes) if (!seen.has(id)) { this.scene.remove(this.itemMeshes[id]); delete this.itemMeshes[id]; }
@@ -623,25 +705,32 @@ export class World {
         a = buildAvatar(p.color);
         a.label = textSprite(p.name, { width: 0.6, size: 30, color: p.color });
         a.label.position.y = 2.25; a.group.add(a.label);
-        a.x = p.x; a.z = p.z; a.yaw = p.yaw; a.phase = 0;
+        a.x = p.x; a.y = p.y || 0; a.z = p.z; a.yaw = p.yaw; a.phase = 0; a.deck = p.deck;
         this.scene.add(a.group);
         this.avatars[p.id] = a;
       }
+      if (a.deck !== p.deck) { a.x = p.x; a.y = p.y || 0; a.z = p.z; a.deck = p.deck; }
       const k = Math.min(1, dt * 12);
-      const ox = a.x, oz = a.z;
-      a.x += (p.x - a.x) * k; a.z += (p.z - a.z) * k;
-      const speed = dt > 0 ? Math.hypot(a.x - ox, a.z - oz) / dt : 0;
-      a.phase += dt * (4 + speed * 2);
-      a.animate(a.phase, Math.min(1, speed / 2.5));
+      const ox = a.x, oz = a.z, oy = a.y;
+      a.x += (p.x - a.x) * k; a.y += ((p.y || 0) - a.y) * k; a.z += (p.z - a.z) * k;
+      const speed = dt > 0 ? Math.hypot(a.x - ox, a.z - oz, a.y - oy) / dt : 0;
+      const floating = !!p.fl || p.deck === EXT_DECK;
+      a.phase += dt * (floating ? 1.2 : 4 + speed * 2);
+      a.animate(a.phase, floating ? 0.25 : Math.min(1, speed / 2.5));
       let dy = p.yaw - a.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
       a.yaw += dy * k;
-      a.group.position.set(a.x, p.deck * DECK_H, a.z);
-      a.group.rotation.set(0, a.yaw + Math.PI, 0);
+      this.spacePos(p.deck, a.x, a.y, a.z, a.group.position);
+      this.spaceQuat(p.deck, a.z, a.group.quaternion);
+      // floating crew lean into their direction of travel and drift slowly; walkers stand upright
+      const lean = floating ? Math.min(1.1, 0.25 + speed * 0.35) : 0;
+      const tq = new THREE.Quaternion().setFromEuler(new THREE.Euler(-lean * Math.cos(a.phase * 0.2) * 0.4 - lean * 0.6, a.yaw + Math.PI, floating ? Math.sin(a.phase * 0.7) * 0.15 : 0, 'YXZ'));
+      a.group.quaternion.multiply(tq);
+      if (floating) a.group.position.y += Math.sin(now * 1.3 + p.id.length) * 0.03;
       a.group.visible = p.deck === deck && p.state !== 'dead' && p.state !== 'spectator';
       a.setSuit(p.suit);
       a.item.visible = !!p.item; if (p.item) a.item.material.color.setHex(ITEMS[p.item.type].color);
-      if (p.state === 'downed') { a.group.rotation.x = -Math.PI / 2; a.group.position.y += 0.3; a.label.material.color.setHex(Math.sin(now * 6) > 0 ? 0xff4040 : 0xffffff); }
-      else { a.group.rotation.x = 0; a.label.material.color.setHex(0xffffff); }
+      if (p.state === 'downed') { a.group.rotateX(-Math.PI / 2); a.label.material.color.setHex(Math.sin(now * 6) > 0 ? 0xff4040 : 0xffffff); }
+      else a.label.material.color.setHex(0xffffff);
     }
     for (const id in this.avatars) if (!seen.has(id)) { this.scene.remove(this.avatars[id].group); delete this.avatars[id]; }
   }

@@ -1,7 +1,7 @@
 // WOLFRAM model viewer: browse the ship's 3D models (uses the game's own builders).
 import * as THREE from 'three';
-import { COMPS, COMP_IDS, DECKS, ROOM_H } from './config.js';
-import { World, buildComp, buildFire, buildAvatar, buildExterior, textSprite } from './world.js';
+import { COMPS, COMP_IDS, DECKS, ROOM_H, RING } from './config.js';
+import { buildComp, buildFire, buildAvatar, buildShipExterior, buildExtComp, buildRingInterior, buildDeckInterior, textSprite } from './world.js';
 import { buildShip, buildStation } from './npc.js';
 import { buildPlanet } from './planet.js';
 let tickFn = null;
@@ -43,7 +43,7 @@ CATS.push({ title: 'Stations & worlds', items: [
   { id: 'phobos', name: 'Mars', sub: 'Thin dusty CO₂ atmosphere', kind: 'planet' },
   { id: 'ganymede', name: 'Jupiter', sub: 'Banded clouds', kind: 'planet' },
 ] });
-CATS.push({ title: 'Whole decks', items: [{ id: 'exterior', name: 'EXTERIOR', sub: 'Hull, spine & drive (EVA area)', kind: 'exterior' }, ...DECKS.slice().reverse().map((d) => ({ id: 'deck' + d.id, name: d.full.split('— ')[1], sub: `Deck ${d.id}`, kind: 'deck', deck: d.id }))] });
+CATS.push({ title: 'Whole decks', items: [{ id: 'exterior', name: 'EXTERIOR', sub: 'Hull, ring, spine & drive (EVA area)', kind: 'exterior' }, { id: 'ring', name: 'CENTRIFUGE RING', sub: 'Spin-gravity science ring', kind: 'ring' }, ...DECKS.slice().reverse().map((d) => ({ id: 'deck' + d.id, name: d.full.split('— ')[1], sub: `Deck ${d.id}`, kind: 'deck', deck: d.id }))] });
 
 const list = $('#list');
 for (const c of CATS) {
@@ -76,7 +76,7 @@ function show(it) {
   let info = '';
   tickFn = null;
   if (it.kind === 'comp') {
-    built = buildComp(COMPS[it.id].mesh, accentOf(it.id));
+    built = COMPS[it.id].ext ? buildExtComp(COMPS[it.id].mesh) : buildComp(COMPS[it.id].mesh, accentOf(it.id));
     root.add(built.group);
     if (!COMPS[it.id].ext) { fireFx = buildFire(); fireFx.position.z = COMPS[it.id].fp * 0.25; root.add(fireFx); }
     const c = COMPS[it.id];
@@ -105,18 +105,21 @@ function show(it) {
     info = `<h2>${it.name}</h2><p>${it.sub}. No atmosphere mesh: each pixel ray-marches Rayleigh and Mie scattering through the air, so the glowing limb, haze, reddened terminator and the planet's shadow fall out of the physics. Sunlight on the ground is filtered by air mass, and the cloud deck drifts inside the atmosphere.</p>`;
   } else if (it.kind === 'exterior') {
     const comps = {};
-    root.add(buildExterior(comps));
-    root.children[0].userData.plume.visible = true;
+    const ship = buildShipExterior(comps);
+    root.add(ship);
+    ship.userData.plume.visible = true; ship.userData.plume.userData.core.visible = true;
     built = { comps, exterior: true };
-    for (const id of ['radA', 'radB']) comps[id].wing.scale.x = 1;
-    info = `<h2>Exterior</h2><p>The pressure hull with the dorsal equipment spine on top. Crew reach it through the Cargo-deck airlock in a vacuum suit. Radiator wings, three PDC turrets, the spinal railgun, the antenna and the sensor array are all repairable by hand.</p><p class="dim">The drive plume is shown lit here.</p>`;
+    for (const id of ['radA', 'radB']) comps[id].wing.scale.y = 1;
+    tickFn = (now) => { ship.userData.ring.rotation.z = now * 0.4; for (const l of ship.userData.navs) if (l.userData.blink) l.visible = now % 1.6 < 0.12; for (const id of ['pdc1', 'pdc2', 'pdc3']) comps[id].gat.barrels.rotation.z = now * 30; };
+    info = `<h2>Exterior</h2><p>A 150 m spine ship, from the bow port to the magnetic nozzle: the command and habitation modules, the centrifuge hub and its spinning ring, then engineering and cargo with the starboard EVA airlock. Behind them run the truss with its tank farm and radiator wings, the drive bus, the shadow shield and the nozzle. Weapons: the ventral spinal railgun, three gatling PDCs and the dorsal 8-cell missile launcher. The cameras on the booms feed the Helm and Fire Control.</p><p class="dim">The ring is shown spinning and the drive plume lit.</p>`;
   } else if (it.kind === 'deck') {
-    const fake = { scene: root, decks: [], comps: {} };
-    World.prototype.buildDeck.call(fake, DECKS[it.deck]);
-    const g = fake.decks[0]; g.position.y = 0;
-    built = { deck: g, comps: fake.comps };
-    g.children[1].visible = opt.ceiling; // ceiling
-    info = `<h2>${DECKS[it.deck].full}</h2><p>${Object.keys(fake.comps).map((id) => COMPS[id].name).join(' · ')}</p><p class="dim">Lift in the centre, emergency locker on the wall. Toggle the ceiling to look inside.</p>`;
+    const { group: g, comps } = buildDeckInterior(DECKS[it.deck]);
+    g.position.y = 0; root.add(g);
+    built = { deck: g, comps };
+    info = `<h2>${DECKS[it.deck].full}</h2><p>${Object.keys(comps).map((id) => COMPS[id].name).join(' · ')}</p><p class="dim">Floors face the drive, so thrust is "down". The open trunk in the centre runs through every deck: float through it in zero-g, or ride the platform lift under thrust. Handrails at waist and head height. Toggle the ceiling to look inside.</p>`;
+  } else if (it.kind === 'ring') {
+    const g = buildRingInterior(); g.position.set(0, 0, 0); root.add(g);
+    info = `<h2>Centrifuge ring</h2><p>A ${(RING.R * 2).toFixed(0)} m ring, ${RING.W} m wide. Spun to 0.3–0.5 g at about 3–4 rpm, "down" points outward. Twelve empty science bays wait for experiments; three spoke ladders climb to the hub.</p>`;
   }
   scene.add(root);
   // frame the model
@@ -139,7 +142,7 @@ function applyOpts() {
   const comps = built && built.comps ? Object.values(built.comps) : built && built.light ? [built] : [];
   for (const b of comps) { const [l, s] = COND[opt.cond]; b.light.material.color.setHex(l); if (b.screen) b.screen.material.color.setHex(s); }
   if (fireFx && current.kind === 'comp') fireFx.visible = opt.fire;
-  if (built && built.deck) built.deck.children[1].visible = opt.ceiling;
+  renderer.clippingPlanes = built && built.deck && !opt.ceiling ? [new THREE.Plane(new THREE.Vector3(0, -1, 0), ROOM_H - 0.45)] : [];
   root.traverse((o) => { if (o.isMesh && o.material && 'wireframe' in o.material) o.material.wireframe = opt.wire; });
 }
 for (const b of document.querySelectorAll('[data-cond]')) b.onclick = () => { opt.cond = b.dataset.cond; document.querySelectorAll('[data-cond]').forEach((x) => x.classList.toggle('sel', x === b)); applyOpts(); };

@@ -55,7 +55,8 @@ export class Sfx {
       case 'boom': this.noise(0.8, 0.3, 400); break;
       case 'rail': this.tone(2400, 0.35, 'sawtooth', 0.15, -2200); this.noise(0.3, 0.3, 3000); break;
       case 'launch': this.noise(1.0, 0.25, 900); this.tone(200, 0.8, 'sawtooth', 0.08, 300); break;
-      case 'pdc': for (let i = 0; i < 10; i++) this.noise(0.05, 0.2, 2500, i * 0.06); break;
+      case 'pdc': this.gatling(1.2, 1); break;
+      case 'srm': for (let i = 0; i < 3; i++) { this.noise(0.9, 0.3, 2400 - i * 500, i * 0.06); } this.tone(140, 0.9, 'sawtooth', 0.06, 260); break;
       case 'chime': this.tone(880, 0.25, 'sine', 0.15); this.tone(1320, 0.35, 'sine', 0.12, 0, 0.12); break;
       case 'warn': this.tone(520, 0.15, 'square', 0.06); this.tone(390, 0.2, 'square', 0.06, 0, 0.16); break;
       case 'msg': this.tone(1000, 0.08, 'sine', 0.1); this.tone(1500, 0.1, 'sine', 0.1, 0, 0.1); break;
@@ -67,37 +68,84 @@ export class Sfx {
       case 'hiss': this.noise(0.25, 0.15, 6000); break;
     }
   }
-  // ---- electromechanical relays & CRT terminals ----
+  // ---- 1979-style ship computer: soft data chirps, key clicks and latching switches ----
+  // (in the spirit of the Nostromo's computer room: sequences of short, pure, high blips rather than loud clacks)
+  chirp(f, dur, vol, delay = 0, type = 'sine') {
+    if (!this.ctx || this.muted || vol <= 0.002) return;
+    const c = this.ctx, t = this.now() + delay;
+    const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.004); g.gain.setValueAtTime(vol, t + dur - 0.006); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
+    o.connect(lp); lp.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.01);
+  }
+  click(vol, delay = 0, f = 5200) { // a small switch or key: very short high-passed tick with a little body
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = this.now() + delay;
+    const n = c.createBufferSource(); n.buffer = this.noiseBuf();
+    const hp = c.createBiquadFilter(); hp.type = 'bandpass'; hp.frequency.value = f; hp.Q.value = 1.4;
+    const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.006);
+    n.connect(hp); hp.connect(g); g.connect(this.master); n.start(t, Math.random()); n.stop(t + 0.01);
+  }
+  // one burst of computer "talk": 3-9 blips on a small fixed scale, sometimes a fast two-tone warble, ticks between
+  chatter(vol = 1, delay = 0) {
+    if (!this.ctx || this.muted || vol <= 0.01) return;
+    const SC = [1046, 1174, 1396, 1567, 1760, 2093, 2349, 2793, 3136];
+    let t = delay;
+    const n = 3 + ((Math.random() * 7) | 0), base = (Math.random() * 4) | 0;
+    for (let i = 0; i < n; i++) {
+      const f = SC[Math.min(SC.length - 1, base + ((Math.random() * 5) | 0))];
+      const d = 0.026 + Math.random() * 0.05;
+      if (Math.random() < 0.18) { for (let k = 0; k < 6; k++) this.chirp(k % 2 ? f * 1.26 : f, 0.022, 0.03 * vol, t + k * 0.024); t += 0.15; }
+      else { this.chirp(f, d, 0.034 * vol, t, Math.random() < 0.25 ? 'triangle' : 'sine'); t += d + 0.018 + Math.random() * 0.05; }
+      if (Math.random() < 0.35) this.click(0.05 * vol, t - 0.01);
+    }
+  }
+  // a latching switch: a soft mechanical "tchk" (two contacts) followed by an acknowledging blip
   relay(vol = 1, delay = 0) {
     if (!this.ctx || this.muted || vol <= 0.01) return;
     const c = this.ctx, t = this.now() + delay;
-    const hit = (tt, v, f) => { // sharp contact transient: band-passed noise + body thump
-      const n = c.createBufferSource(); n.buffer = this.noiseBuf();
-      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 2.5;
-      const g = c.createGain(); g.gain.setValueAtTime(v, tt); g.gain.exponentialRampToValueAtTime(0.0008, tt + 0.012);
-      n.connect(bp); bp.connect(g); g.connect(this.master); n.start(tt, Math.random()); n.stop(tt + 0.02);
-      const o = c.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(220 + Math.random() * 120, tt); o.frequency.exponentialRampToValueAtTime(90, tt + 0.03);
-      const og = c.createGain(); og.gain.setValueAtTime(v * 0.35, tt); og.gain.exponentialRampToValueAtTime(0.0008, tt + 0.035);
-      o.connect(og); og.connect(this.master); o.start(tt); o.stop(tt + 0.04);
-    };
-    const f = 2600 + Math.random() * 1800;
-    hit(t, 0.55 * vol, f);
-    hit(t + 0.006 + Math.random() * 0.006, 0.22 * vol, f * 1.3); // contact bounce
-    if (Math.random() < 0.5) hit(t + 0.05 + Math.random() * 0.12, 0.3 * vol, f * 0.8); // release / second relay
+    const n = c.createBufferSource(); n.buffer = this.noiseBuf();
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800 + Math.random() * 900; bp.Q.value = 3;
+    const g = c.createGain(); g.gain.setValueAtTime(0.22 * vol, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.02);
+    n.connect(bp); bp.connect(g); g.connect(this.master); n.start(t, Math.random()); n.stop(t + 0.03);
+    this.click(0.09 * vol, delay + 0.011, 3800);
+    if (Math.random() < 0.7) this.chirp([1567, 2093, 2349, 1760][(Math.random() * 4) | 0], 0.045, 0.03 * vol, delay + 0.04);
   }
-  relayBank(n, spread = 0.6, vol = 1, delay = 0) { for (let i = 0; i < n; i++) this.relay(vol * (0.6 + Math.random() * 0.4), delay + Math.random() * spread); }
-  crtOn(vol = 1) { // degauss thunk + flyback whine + static crackle
+  relayBank(n, spread = 0.6, vol = 1, delay = 0) { // a console waking up: switches, then the computer answering
+    for (let i = 0; i < Math.min(4, n); i++) this.relay(vol * (0.6 + Math.random() * 0.4), delay + (i / Math.max(1, n)) * spread * 0.5);
+    this.chatter(vol, delay + spread * 0.5);
+    if (n > 4) this.chatter(vol * 0.8, delay + spread * 0.5 + 0.45);
+  }
+  crtOn(vol = 1) { // degauss thump, rising flyback whine, then the terminal's start-up blips
     if (!this.ctx || this.muted) return;
     const c = this.ctx, t = this.now();
     const o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.5);
-    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35 * vol, t + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.28 * vol, t + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
     o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.65);
     const w = c.createOscillator(); w.type = 'sine'; w.frequency.setValueAtTime(5200, t); w.frequency.linearRampToValueAtTime(7800, t + 0.9);
-    const wg = c.createGain(); wg.gain.setValueAtTime(0.0001, t); wg.gain.exponentialRampToValueAtTime(0.018 * vol, t + 0.3); wg.gain.exponentialRampToValueAtTime(0.0005, t + 1.6);
+    const wg = c.createGain(); wg.gain.setValueAtTime(0.0001, t); wg.gain.exponentialRampToValueAtTime(0.014 * vol, t + 0.3); wg.gain.exponentialRampToValueAtTime(0.0005, t + 1.6);
     w.connect(wg); wg.connect(this.master); w.start(t); w.stop(t + 1.7);
-    for (let i = 0; i < 14; i++) this.noise(0.012, 0.08 * vol * Math.random(), 6000, Math.random() * 0.5);
+    [1046, 1396, 2093].forEach((f, i) => this.chirp(f, 0.06, 0.03 * vol, 0.55 + i * 0.08));
   }
-  bootBeep(vol = 1, delay = 0) { this.tone(1180, 0.09, 'square', 0.045 * vol, 0, delay); }
+  // weapons
+  gatling(dur = 1.2, n = 1) { // ~65 rounds/s per gun: a ripping buzz of individual reports
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = this.now();
+    const src = c.createBufferSource(); src.buffer = this.noiseBuf(); src.loop = true;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.8;
+    const am = c.createGain(); am.gain.value = 0;
+    const lfo = c.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 62 + Math.random() * 8;
+    const lg = c.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(am.gain);
+    const g = c.createGain(); const v = 0.22 * Math.min(1.6, 0.7 + n * 0.3);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.12); g.gain.setValueAtTime(v, t + dur - 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp); bp.connect(am); am.connect(g); g.connect(this.master);
+    src.start(t); lfo.start(t); src.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
+    const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(65, t);
+    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.06, t + 0.1); og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const olp = c.createBiquadFilter(); olp.type = 'lowpass'; olp.frequency.value = 180;
+    o.connect(olp); olp.connect(og); og.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
+  }
+  bootBeep(vol = 1, delay = 0) { this.chirp(1396, 0.07, 0.04 * vol, delay); this.chirp(2093, 0.05, 0.03 * vol, delay + 0.08); }
   setConsoleHum(on) {
     if (!this.ctx) return;
     if (!this.chum) {
@@ -116,7 +164,7 @@ export class Sfx {
   idle(dt, focused, nearConsoles) {
     if (!this.ctx || this.muted) return;
     const rate = focused ? 0.45 : 0.1 * Math.min(4, nearConsoles);
-    if (Math.random() < rate * dt) { if (focused && Math.random() < 0.3) this.relayBank(2 + ((Math.random() * 3) | 0), 0.35, 0.55); else this.relay(focused ? 0.5 : 0.18); }
+    if (Math.random() < rate * dt) { if (Math.random() < 0.65) this.chatter(focused ? 0.8 : 0.3); else this.relay(focused ? 0.5 : 0.18); }
   }
   // record the game's audio output (used for demo capture)
   startCapture() {

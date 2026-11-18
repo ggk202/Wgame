@@ -38,6 +38,34 @@ The ship and crew follow an ISS-era, NASA-style look. It's built entirely from p
 
 Skip a step with `N`. At the end you can keep flying in free play (the storyteller wakes up) or return to the lobby. Tutorial games are never autosaved.
 
+## The ship
+
+The CSV Wolfram is about 150 m long. From bow to stern:
+
+* **Bow:** the docking port.
+* **Pressure modules:** the command and habitation modules, then the centrifuge hub with its spinning ring and three spokes, then the engineering and cargo modules. The cargo module has the starboard airlock and a work pod berthed on the port side.
+* **Spine truss:** a tank farm (spherical D-He3 tanks and long gold-foil reaction-mass tanks) and two big radiator wings.
+* **Stern:** the drive bus, the shadow shield and a magnetic nozzle.
+
+Weapons:
+
+* **Spinal railgun:** twin ventral rails run the length of the modules, with the muzzle beside the bow port.
+* **Three 6-barrel gatling PDCs:** each one tracks threats, spins up and fires tracer streams.
+* **Dorsal 8-cell launcher:** fires Kestrel short-range missiles. It reloads itself from stock, fires salvos of 1, 2 or 4, and its cell lids pop as the missiles boost out.
+
+Nine **external cameras** can be cycled at the Helm and at Fire Control. They are CCTV feeds rendered live into the console.
+
+Interiors are built for both thrust gravity and zero-g:
+
+* tread-plate floors and acoustic ceilings;
+* eight structural ribs per deck, with rack bays between them;
+* handrails at waist and head height, ceiling grab bars and foot loops;
+* a hazard-striped open trunk with a safety railing, a ladder and a platform lift.
+
+Static geometry is merged by material, so the detail stays cheap to draw.
+
+**Console sounds:** the panels chatter like a 1979 ship's computer: soft data blips, key clicks and latching switches.
+
 ## Flying the ship
 
 The ship has a full rotational state. Its quaternion attitude and angular rates are driven by RCS thrusters, and the main drive pushes along wherever the nose points.
@@ -63,12 +91,18 @@ Every screen on the ship is live, showing its system's readouts in a retro amber
 | 1 Cargo | Fabricator, stores, repair drone bay (external systems), torpedo magazine |
 | 0 Drive | Fusion torch drive, drive control, reaction-mass tanks, pellet injector |
 
-**Exterior (EVA):** suit up at an emergency locker, then cycle out through the airlock on the Cargo deck. You walk the dorsal equipment spine on mag boots: two radiator wings (they glow as the heat sink fills), three PDC turrets, the spinal railgun, the high-gain antenna and the sensor array. Repair them by hand (`R`, with a spare kit if destroyed) or weld hull plating with a Hull Patch (`F`). Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at the hatch), and weapon hits on external systems hurt crew nearby. Above 0.6 g of thrust, the safety tether yanks you back into the airlock, injured. Repair drones remain the remote alternative.
+**Exterior (EVA):** suit up at an emergency locker, then cycle out through the starboard airlock on the Cargo deck. You fly a SAFER-style jet pack (`WASD`, `Space`/`C`, `Shift` for more push) on a 110 m safety tether. Near the hull, letting go means grabbing a handrail. Out in the open you drift.
+
+You can repair the external systems by hand (`R`, with a spare kit if destroyed): two radiator wings (they glow as the heat sink fills), three gatling PDCs, the missile launcher, the spinal railgun, the high-gain antenna and the sensor array. You can also weld hull plating with a Hull Patch (`F`).
+
+Outside there is no radiation shielding, suit O₂ lasts 5 minutes (refill at the hatch), and weapon hits on external systems hurt crew nearby. Any thrust above 0.08 g sweeps you off the hull and the tether reels you in, injured. Repair drones remain the remote alternative.
 
 ## Hard sci-fi rules
 
 * **Newtonian travel:** burn, coast, flip 180° and burn to stop, using the rocket equation and a reaction-mass budget. The ship's clock is time-compressed while cruising and drops to real time in combat.
-* **No artificial gravity:** thrust is gravity. Above 2.2 g, crew who aren't sitting at a console get hurt. Below 0.05 g you walk on mag boots.
+* **Thrust is gravity:** the decks are stacked nose-to-tail with their floors facing the drive. Under thrust you walk, and above 2.2 g crew who aren't sitting at a console get hurt.
+* **Zero-g:** with the drive off, everyone floats. You push off where you look, grab handrails, and drift through the open trunk between decks. When the drive lights, floating crew fall toward the drive. A fall down the trunk under thrust can injure or kill.
+* **Centrifuge ring:** a 51 m ring around the hub between Habitation and Engineering. Spin it to 0.17–0.5 g (about 2.5–4.2 rpm) at Centrifuge Control. Spinning up costs power and twists the hull, which SAS has to counter, and the bearings wear. Inside, "down" is outward. Under thrust the floor tilts toward the drive. It has twelve empty science bays ready for experiments.
 * **Heat:** the reactor, drive, electronics, fires and railgun shots all fill a heat sink that only radiators can empty. Retracted radiators are safer in combat but dump heat 6× slower.
 * **Atmosphere:** each deck tracks O₂, N₂ and CO₂ partial pressures and temperature. Breaches vent decks, and venting on purpose kills fires. Repressurising costs finite gas reserves.
 * **Radiation:** proton storms (shelter behind the water walls), coolant leaks and reactor accidents. Dose accumulates per crew member.

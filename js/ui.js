@@ -1,5 +1,5 @@
 // DOM UI: widget builder for console panels, HUD, toasts, crew votes.
-import { COMPS, DECKS, WAYPOINTS, SHIP, ITEMS, EXT, EXT_DECK, deckName } from './config.js';
+import { COMPS, DECKS, WAYPOINTS, SHIP, ITEMS, EXT, EXT_DECK, RING_DECK, atmoDeck, deckName } from './config.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp } from './util.js';
 import { eff, heatFrac, deltaV, inShelter } from './sim.js';
 
@@ -260,7 +260,7 @@ export class HUD {
       ${S.enc ? `<div class="sl"><span>COMBAT</span><b class="bad">${S.enc.enemies.filter((e) => !e.dead && !e.gone).length} hostile · ${S.enc.proj.filter((p) => p.from === 'them').length} inbound</b></div>` : ''}
       ${S.effects.stormWarn > 0 ? `<div class="sl"><span>STORM</span><b class="bad">PROTONS IN ${Math.ceil(S.effects.stormWarn)} s — SHELTER!</b></div>` : S.effects.stormT > 0 ? `<div class="sl"><span>STORM</span><b class="bad">PROTON STORM ${Math.ceil(S.effects.stormT)} s</b></div>` : ''}
       ${S.effects.debris > 0 ? `<div class="sl"><span>DEBRIS</span><b class="warn">impact in ${Math.ceil(S.effects.debris)} s</b></div>` : ''}`;
-    const d = S.decks[me.deck], P = d.o2 + d.n2 + d.co2;
+    const d = S.decks[atmoDeck(me.deck)], P = d.o2 + d.n2 + d.co2;
     const shelter = inShelter(me);
     let st = me.state === 'downed' ? `<div class="big bad">DOWN — ${Math.ceil(me.downT)} s until death. A crewmate needs a medkit.</div>`
       : me.state === 'dead' ? `<div class="big bad">DEAD — ${S.pods > 0 ? 'thawing a backup crew member…' : 'no backup crew left'}</div>`
@@ -271,8 +271,8 @@ export class HUD {
       <div class="sl"><span>DOSE</span><b class="${cls(me.dose, 1, 3, true)}">${me.dose.toFixed(2)} Sv${shelter ? ' · SHELTERED' : ''}</b></div>
       <div class="sl"><span>HANDS</span><b>${me.item ? ITEMS[me.item.type].name + (me.item.type === 'ext' || me.item.type === 'spares' ? ` (${Math.max(0, Math.round(me.item.charge))}%)` : '') : '—'}</b></div>
       ${me.deck === EXT_DECK ? `<div class="sl"><span>EVA</span><b class="${me.suit ? 'warn' : 'bad'}">HARD VACUUM${me.suit ? '' : ' — NO SUIT!'}${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`
-        : `<div class="sl"><span>${DECKS[me.deck].name.toUpperCase()}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`}
-      <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.75) ? 'bad' : ''}">${S.drive.g.toFixed(2)} g${S.drive.g < 0.05 || me.deck === EXT_DECK ? ' · MAG BOOTS' : ''}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK ? ` · tether yanks above ${EXT.maxG} g` : ''}</b></div>`;
+        : `<div class="sl"><span>${me.deck === RING_DECK ? 'RING' : DECKS[me.deck].name.toUpperCase()}</span><b class="${P < 50 ? 'bad' : d.o2 < 16 || d.co2 > 1.2 ? 'warn' : ''}">${P.toFixed(0)} kPa · O₂ ${d.o2.toFixed(1)} · CO₂ ${d.co2.toFixed(2)} · ${d.temp.toFixed(0)}°C${d.rad > 0.01 ? ` · ☢ ${(d.rad * 3600).toFixed(0)} mSv/h` : ''}</b></div>`}
+      <div class="sl"><span>G</span><b class="${S.drive.g > 2.2 || (me.deck === EXT_DECK && S.drive.g > EXT.maxG * 0.5) ? 'bad' : ''}">${me.deck === RING_DECK ? `${S.ring.g.toFixed(2)} g spin${S.drive.g > 0.01 ? ` + ${S.drive.g.toFixed(2)} g thrust (floor tilts aft)` : ''}${S.ring.g < 0.04 && S.drive.g < 0.04 ? ' · FLOATING' : ''}` : `${S.drive.g.toFixed(2)} g${S.drive.g < 0.04 ? (me.deck === EXT_DECK ? ' · ZERO-G · JET PACK (Space/C up/down)' : ' · ZERO-G · FLOATING (Space/C up/down)') : ' THRUST — floors are down'}`}${S.drive.g > 2.2 && !me.seat ? ' — GET TO A COUCH' : ''}${me.deck === EXT_DECK ? ` · tether ${Math.round((me.tether || 0) * 100)}% of ${EXT.tether} m · reels in above ${EXT.maxG} g` : ''}</b></div>`;
     document.body.classList.toggle('suited', !!me.suit && me.state === 'alive');
     // prompt
     this.prompt.innerHTML = focus ? promptFor(S, me, focus, ctx.touch) : '';

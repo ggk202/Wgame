@@ -1,7 +1,7 @@
 // Console panel definitions. Each: { title, build(B, ctx, compId) }
-import { COMPS, COMP_IDS, DECKS, WAYPOINTS, SHIP, G0, RECIPES, STATION_PRICES, ITEMS, AU, EXT, deckName } from './config.js';
+import { COMPS, COMP_IDS, DECKS, WAYPOINTS, SHIP, G0, RECIPES, STATION_PRICES, ITEMS, AU, EXT, RING, RING_DECK, deckName } from './config.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp, pct } from './util.js';
-import { eff, maxG, deltaV, heatFrac, demandOf, PDCS } from './sim.js';
+import { eff, maxG, deltaV, heatFrac, demandOf, PDCS, ringRpm } from './sim.js';
 import { qrot, qconj, nose, angDeg, sasModes, rollErr } from './attitude.js';
 import { RAIL_CONE } from './combat.js';
 import { ENEMY_TYPES } from './combat.js';
@@ -77,6 +77,7 @@ export const PANELS = {
         { label: 'Undock & depart', act: 'helm.depart', cls: 'green', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1 },
       ]);
       B.note('Docking is flown by hand: the approach starts about 200 m out. Null your sideways drift, line the cross up inside the target circle, match roll, and touch the port slower than 0.25 m/s.');
+      camBlock(B);
     },
   },
 
@@ -173,7 +174,11 @@ export const PANELS = {
         { label: 'LAUNCH TORPEDO', cls: 'red', act: 'tac.torp', enabled: (S) => S.weap.tubes.some((t) => t.loaded) && !!S.enc },
         { label: 'Deploy chaff', act: 'tac.chaff', labelFn: (S) => `Deploy chaff (${S.stores.chaff})`, enabled: (S) => !!S.enc && S.stores.chaff > 0 },
       ]);
-      B.section('Point defence (PDCs)');
+      B.section('Missile launcher (Kestrel, 8 cells)');
+      B.kv('Cells', (S) => ({ text: `${'▮'.repeat(S.weap.cells)}${'▯'.repeat(8 - S.weap.cells)}  ${S.weap.cells}/8 ready · ${S.stores.srm} in stock${S.weap.cells < 8 && S.stores.srm > 0 ? ` · reloading ${pct(S.weap.cellT / 18)}` : ''}`, cls: S.weap.cells ? 'good' : 'warn' }));
+      B.buttons([1, 2, 4].map((n) => ({ label: `SALVO ×${n}`, cls: 'red', act: 'tac.srm', args: () => ({ n }), enabled: (S) => !!S.enc && S.weap.cells >= n && eff(S, 'launcher') > 0 })));
+      B.note('Kestrels are small, fast and cheap: each hits for less than a torpedo, but salvoes swamp enemy point defence. The launcher reloads one cell every 18 s from stock (fabricate more at Cargo).');
+      B.section('Point defence (gatling PDCs)');
       B.seg('Mode', [{ v: 'auto', l: 'Auto' }, { v: 'manual', l: 'Manual' }, { v: 'off', l: 'Off' }], (S) => S.weap.pdcMode, 'tac.pdc', (v) => ({ mode: v }), (S, v) => v !== 'auto' || S.settings.autoPDC);
       B.kv('Turrets / ammo', (S) => `${PDCS.map((id) => pct(eff(S, id))).join(' · ')} · ${S.stores.pdcAmmo} rds`);
       B.html((S) => {
@@ -183,7 +188,8 @@ export const PANELS = {
         if (!inc.length) return '<div class="note">No incoming fire.</div>';
         return '<table class="tbl"><tr><th>Incoming</th><th>Range</th><th>ETA</th><th></th></tr>' + inc.map((p) => `<tr><td class="${p.type === 'missile' ? 'bad' : 'warn'}">${p.type === 'missile' ? 'TORPEDO' + (p.chaffed ? ' (spoofed)' : '') : 'RAIL SLUG'}</td><td>${p.range.toFixed(0)} km</td><td>${Math.ceil(p.range / Math.max(1, p.speed))} s</td><td>${p.type === 'missile' && S.weap.pdcMode === 'manual' ? (S.weap.focus.includes(p.id) ? '<b class="good">ENGAGING</b>' : btn('ENGAGE', 'tac.focus', { id: p.id }, 'red')) : ''}</td></tr>`).join('') + '</table>';
       });
-      B.note('PDCs cannot stop railgun slugs, only torpedoes and drones. Slugs are dodged by evasive jinking at the helm. In manual mode, ENGAGE each torpedo for a much better kill chance.');
+      B.note('Three 6-barrel gatlings: each burst is a wall of tracers. PDCs cannot stop railgun slugs, only torpedoes and drones. Slugs are dodged by evasive jinking at the helm. In manual mode, ENGAGE each torpedo for a much better kill chance.');
+      camBlock(B);
     },
   },
 
@@ -415,7 +421,7 @@ export const PANELS = {
   extcomp: {
     title: 'EXTERNAL SYSTEM',
     build(B, ctx, id) {
-      const info = { radA: 'Radiator wing: dumps waste heat to space (50 MW extended, 8 MW retracted).', radB: 'Radiator wing: dumps waste heat to space (50 MW extended, 8 MW retracted).', railgun: 'Spinal railgun barrel and capacitor housing. Fired from Fire Control.', antenna: 'High-gain antenna for long-range comms and hailing.', sensorArray: 'Radar, lidar and IR array. Feeds target lock quality.' }[id] || 'Point-defence cannon: shreds incoming torpedoes and drones.';
+      const info = { radA: 'Radiator wing: dumps waste heat to space (50 MW extended, 8 MW retracted).', radB: 'Radiator wing: dumps waste heat to space (50 MW extended, 8 MW retracted).', railgun: 'Spinal railgun capacitor bank and breech. The rails run under the modules to a muzzle beside the bow port. Fired from Fire Control.', launcher: 'Kestrel 8-cell missile launcher. Reloads itself from the missile stock.', pdc1: 'Gatling PDC: six 30 mm barrels, about 4,000 rounds a minute.', pdc2: 'Gatling PDC: six 30 mm barrels, about 4,000 rounds a minute.', pdc3: 'Gatling PDC: six 30 mm barrels, about 4,000 rounds a minute.', antenna: 'High-gain antenna for long-range comms and hailing.', sensorArray: 'Radar, lidar and IR array. Feeds target lock quality.' }[id] || 'Point-defence cannon: shreds incoming torpedoes and drones.';
       B.note(`<b>${COMPS[id].name}</b>: ${info}`);
       B.bar('Integrity', (S) => ({ v: S.comps[id].hp / 100, text: Math.round(S.comps[id].hp) + '%', cls: cls(S.comps[id].hp, 60, 25) }));
       B.kv('Drone job', (S) => (S.drones.jobs.some((j) => j.target === id) ? 'a drone is working on it' : '—'));
@@ -431,7 +437,7 @@ export const PANELS = {
         { label: 'Refill suit O₂', act: 'locker.refill' },
         { label: 'Cycle out to EVA', cls: 'green', onClick: () => ctx.local('local.eva', { out: true }), enabled: () => ctx.me().suit },
       ]);
-      B.note('Outside is hard vacuum. You walk the dorsal equipment spine on mag boots, with radiators, PDC turrets, the railgun, antenna and sensor array. Hold R to repair them (spare kit needed if destroyed). Hold F with a Hull Patch to weld hull plating. If thrust goes above 0.6 g, your tether yanks you back in, and it hurts. You get no radiation shielding out there. Vacuum suits are in the emergency locker.');
+      B.note(`Outside is hard vacuum. You fly a SAFER-style jet pack (WASD, Space/C up/down, Shift for more push) clipped to a ${EXT.tether} m safety tether. With nothing pressed near the hull you hold on to the handrails. Radiators, gatling PDCs, the missile launcher, the railgun, antenna and sensor array can all be repaired by hand: hold R (spare kit needed if destroyed). Hold F with a Hull Patch to weld hull plating. Any thrust above ${EXT.maxG} g sweeps you off the hull and the tether reels you in, and it hurts. No radiation shielding out there. Vacuum suits are in the emergency lockers.`);
     },
   },
   hatch: {
@@ -444,10 +450,28 @@ export const PANELS = {
       ]);
     },
   },
+  centrifuge: {
+    title: 'CENTRIFUGE',
+    build(B) {
+      B.canvas(560, 170, drawRing);
+      B.kv('Spin gravity', (S) => ({ text: `${S.ring.g.toFixed(3)} g at the floor · ${ringRpm(S.ring.g).toFixed(2)} rpm${Math.abs(S.ring.target - S.ring.g) > 0.002 && !S.ring.brake ? (S.ring.target > S.ring.g ? ' · SPINNING UP' : ' · SPINNING DOWN') : ''}${S.ring.brake ? ' · BRAKING' : ''}`, cls: S.ring.g > 0.05 ? 'good' : '' }));
+      B.slider('Target spin', { min: 0, max: RING.maxG, step: 0.01, get: (S) => S.ring.target, fmt: (v) => `${v.toFixed(2)} g (${ringRpm(v).toFixed(1)} rpm)`, act: 'ring.target', args: (v) => ({ g: v }) });
+      B.buttons([
+        { label: 'Lunar (0.17 g)', act: 'ring.target', args: () => ({ g: 0.17 }) },
+        { label: 'Mars (0.38 g)', act: 'ring.target', args: () => ({ g: 0.38 }) },
+        { label: 'Max (0.5 g)', act: 'ring.target', args: () => ({ g: 0.5 }) },
+        { label: 'Emergency brake', cls: 'red', act: 'ring.brake', args: () => ({ on: true }) },
+      ]);
+      B.bar('Bearing wear', (S) => ({ v: S.ring.wear, text: pct(S.ring.wear), cls: S.ring.wear > 0.8 ? 'bad' : S.ring.wear > 0.5 ? 'warn' : 'good' }));
+      B.kv('Motor draw', (S) => `${demandOf(S, 'centrifuge').toFixed(1)} MW`);
+      B.note((S) => `Spinning the ring up or down pushes the opposite twist into the hull: SAS soaks it up with RCS. Under thrust the ring floor feels tilted toward the drive (now ${(Math.atan2(S.drive.g, Math.max(0.001, S.ring.g)) * 57.3).toFixed(0)}°). Each of the twelve science bays is empty, with power, data and coolant hook-ups waiting for experiments.`);
+    },
+  },
   lift: {
     title: 'LIFT',
     build(B, ctx) {
-      B.html((S) => DECKS.slice().reverse().map((d) => `<button class="btn wide ${ctx.me().deck === d.id ? 'sel' : ''}" data-act="local.lift" data-args='{"deck":${d.id}}'>${d.full}${S.breaches.some((b) => b.deck === d.id) ? ' <i class="bad">BREACH</i>' : ''}${COMP_IDS.some((id) => !COMPS[id].ext && COMPS[id].deck === d.id && S.comps[id].fire > 0) ? ' <i class="bad">FIRE</i>' : ''}</button>`).join(''));
+      B.html((S) => DECKS.slice().reverse().map((d) => `<button class="btn wide ${ctx.me().deck === d.id ? 'sel' : ''}" data-act="local.lift" data-args='{"deck":${d.id}}'>${d.full}${S.breaches.some((b) => b.deck === d.id) ? ' <i class="bad">BREACH</i>' : ''}${COMP_IDS.some((id) => !COMPS[id].ext && COMPS[id].deck === d.id && S.comps[id].fire > 0) ? ' <i class="bad">FIRE</i>' : ''}</button>` + (d.id === 3 ? `<button class="btn wide" data-act="local.lift" data-args='{"deck":${RING_DECK}}'>CENTRIFUGE RING — via the hub and a spoke ladder · ${S.ring.g.toFixed(2)} g</button>` : '')).join(''));
+      B.note((S) => (S.drive.g < 0.04 ? 'Zero-g: you can also float straight up or down the open trunk (Space / C, or the ▲ ▼ buttons).' : `Under ${S.drive.g.toFixed(2)} g the trunk is a ${(7 * 4).toFixed(0)} m drop. Ride the platform, or use the ladder.`));
     },
   },
   debug: {
@@ -460,6 +484,33 @@ export const PANELS = {
   },
 };
 
+// spinning ring diagram: rpm, the floor's "down", spokes turning
+function drawRing(g, S, w, h) {
+  g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
+  const cx = 95, cy = h / 2, R = 70, a0 = S.ring.spin;
+  g.strokeStyle = '#ff8a1e'; g.lineWidth = 10; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+  g.lineWidth = 3; g.strokeStyle = '#a8581a';
+  for (const d of RING.spokes) { const a = a0 + (d * Math.PI) / 180; g.beginPath(); g.moveTo(cx + Math.cos(a) * 14, cy + Math.sin(a) * 14); g.lineTo(cx + Math.cos(a) * (R - 6), cy + Math.sin(a) * (R - 6)); g.stroke(); }
+  g.fillStyle = '#ffc27a'; g.beginPath(); g.arc(cx, cy, 13, 0, 7); g.fill();
+  for (let i = 0; i < 6; i++) { const a = a0 + (i / 6) * Math.PI * 2; g.strokeStyle = '#ffd23f'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx + Math.cos(a) * (R + 8), cy + Math.sin(a) * (R + 8)); g.lineTo(cx + Math.cos(a) * (R + 8 + S.ring.g * 40), cy + Math.sin(a) * (R + 8 + S.ring.g * 40)); g.stroke(); }
+  g.font = '14px monospace'; g.fillStyle = '#ffc27a';
+  g.fillText(`RING  R ${RING.R} m · W ${RING.W} m`, 200, 30);
+  g.fillText(`SPIN  ${S.ring.g.toFixed(3)} g   ${ringRpm(S.ring.g).toFixed(2)} rpm`, 200, 54);
+  g.fillText(`TARGET ${S.ring.target.toFixed(2)} g`, 200, 78);
+  g.fillText(`THRUST ${S.drive.g.toFixed(2)} g → floor tilt ${(Math.atan2(S.drive.g, Math.max(0.001, S.ring.g)) * 57.3).toFixed(0)}°`, 200, 102);
+  const crew = Object.values(S.players).filter((p) => p.deck === RING_DECK && p.connected).length;
+  g.fillText(`CREW IN RING ${crew}`, 200, 126);
+  g.fillStyle = '#a8581a'; g.fillText('yellow: "down" is outward', 200, 150);
+}
+// external camera feeds: rendered by the main renderer into the console
+function camBlock(B) {
+  B.section('External cameras');
+  B.view('cams');
+  B.buttons([
+    { label: '◀ Prev camera', onClick: () => B.ctx.cams && (B.ctx.cams.cam -= 1) },
+    { label: 'Next camera ▶', onClick: () => B.ctx.cams && (B.ctx.cams.cam += 1) },
+  ]);
+}
 function telescopeBlock(B) {
   B.view('telescope');
   B.buttons([
@@ -545,6 +596,8 @@ export function statusBlock(B) {
 const pc = (v) => Math.round(v * 100) + '%';
 const C = (v, w, b, hi) => cls(v, w, b, hi);
 export function screenInfo(S, id) {
+  if (id === 'centrifuge') return { title: 'CENTRIFUGE', lines: [['SPIN', S.ring.g.toFixed(2) + ' g'], ['RPM', ringRpm(S.ring.g).toFixed(2)], ['TARGET', S.ring.target.toFixed(2) + ' g'], ['BEARINGS', Math.round((1 - S.ring.wear) * 100) + '%', S.ring.wear > 0.7 ? 'warn' : '']] };
+  if (id === 'launcher') return { title: 'KESTREL VLS', lines: [['CELLS', S.weap.cells + '/8'], ['STOCK', String(S.stores.srm)]], bars: [['INTEGRITY', S.comps.launcher.hp / 100, '']] };
   if (id === 'helm#0') { const A = S.att, d = (x) => ((x * 180) / Math.PI).toFixed(2); return { title: 'ATTITUDE', lines: [['SAS', A.mode.toUpperCase()], ['NOSE/PRO', angDeg(nose(A.q), [0, 0, -1]).toFixed(1) + '°'], ['P/Y/R °/s', `${d(A.w[0])} ${d(A.w[1])} ${d(A.w[2])}`], ['RCS', A.rcs ? 'FIRING' : 'IDLE', A.rcs ? 'warn' : '']] }; }
   if (id === 'helm#1') {
     if (S.nav.state === 'approach' && S.prox) { const P = S.prox; return { title: 'DOCKING', lines: [['RANGE', Math.max(0, P.p[2]).toFixed(1) + ' m'], ['CLOSING', (-P.v[2]).toFixed(2) + ' m/s', -P.v[2] > 0.25 && P.p[2] < 10 ? 'bad' : ''], ['OFF-AXIS', Math.hypot(P.p[0], P.p[1]).toFixed(2) + ' m'], ['ROLL', rollErr(S.att.q).toFixed(1) + '°']] }; }

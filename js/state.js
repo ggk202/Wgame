@@ -48,10 +48,12 @@ export function createState(opts = {}) {
     att: { q: [0, 0, 0, 1], w: [0, 0, 0], mode: D.sas === 'none' ? 'off' : 'hold', cmd: [0, 0, 0], tcmd: [0, 0, 0], cmdT: 0, err: 0, rcs: false },
     prox: null,
     life: { o2: 1200, n2: 3500, water: 3000, food: 160, electrolysis: true, sat: 0.15, regen: 0, suppressant: 4 },
-    stores: { spares: 10, patch: 6, medkit: 6, cartridge: 3, feedstock: 300, missiles: 6, slugs: 30, pdcAmmo: 6000, chaff: 4 },
+    stores: { spares: 10, patch: 6, medkit: 6, cartridge: 3, feedstock: 300, missiles: 6, srm: 16, slugs: 30, pdcAmmo: 6000, chaff: 4 },
     fab: { queue: [] },
     drones: { total: 4, jobs: [] },
-    weap: { rail: 0, charging: false, tubes: [{ loaded: true, load: 0 }, { loaded: false, load: 0 }], pdcMode: D.autoPDC ? 'auto' : 'manual', chaffT: 0, focus: [] },
+    weap: { rail: 0, charging: false, tubes: [{ loaded: true, load: 0 }, { loaded: false, load: 0 }], pdcMode: D.autoPDC ? 'auto' : 'manual', chaffT: 0, focus: [], cells: 8, cellT: 0, pdcFire: [0, 0, 0] },
+    // centrifuge ring: g = current spin gravity at the floor, target = commanded g, wear = bearing wear 0..1
+    ring: { g: 0, target: 0, spin: 0, wear: 0, brake: false },
     sensors: { lock: null, q: 0, pingCd: 0, pingT: 0 },
     enc: null,            // combat encounter
     vote: null,           // pending crew decision
@@ -69,7 +71,7 @@ export function extDeck() { return { id: 5, ext: true, o2: 0, n2: 0, co2: 0, tem
 export function newPlayer(id, name, color) {
   return {
     id, name: name || 'Crew', color: color || '#ff8c42',
-    deck: 3, x: 0, z: 3.2, yaw: Math.PI, pitch: 0,
+    deck: 3, x: 0, y: 0, z: -3.0, yaw: 0, pitch: 0, fl: false,
     hp: 100, suit: false, suitO2: 300, dose: 0,
     item: null, state: 'alive', downT: 0, respawnT: 0, seat: null, tp: 1, connected: true, work: null,
   };
