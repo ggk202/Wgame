@@ -3,11 +3,26 @@
 import * as THREE from 'three';
 import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WAYPOINTS, EXT, EXT_DECK, AIRLOCK } from './config.js';
 import { polar, compDeck } from './util.js';
-import { PAL, mat, emis, texMat, mliTex, rackTex, floorTex, textSprite, planeLabel, buildComp, buildFire, buildAvatar, buildExterior, buildPlanet } from './models.js';
+import { PAL, mat, emis, texMat, mliTex, rackTex, floorTex, textSprite, planeLabel, buildComp, buildFire, buildAvatar, buildExterior } from './models.js';
+import { buildPlanet } from './planet.js';
+import { buildStation } from './npc.js';
 
 export { textSprite, buildComp, buildFire, buildAvatar, buildExterior };
 
 const SEG = 16;
+// Soft studio-style environment for PBR reflections (bright overhead panels, dim floor)
+function makeEnvironment(renderer) {
+  const env = new THREE.Scene();
+  const room = new THREE.Mesh(new THREE.BoxGeometry(20, 10, 20), new THREE.MeshBasicMaterial({ color: 0x5a5e66, side: THREE.BackSide }));
+  env.add(room);
+  const panel = (w, h, x, y, z, rx, c = 0xffffff, k = 3) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), side: THREE.DoubleSide })); m.position.set(x, y, z); m.rotation.x = rx; env.add(m); };
+  panel(12, 4, 0, 4.9, 0, Math.PI / 2); panel(4, 4, -9.9, 2, 0, 0, 0xfff0e0, 2); panel(6, 2, 0, 1, -9.9, 0, 0xcfe0ff, 1.5);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshBasicMaterial({ color: 0x23262b })); floor.rotation.x = -Math.PI / 2; floor.position.y = -4.9; env.add(floor);
+  const pm = new THREE.PMREMGenerator(renderer);
+  const rt = pm.fromScene(env, 0.04);
+  pm.dispose();
+  return rt.texture;
+}
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // ---------- live console screens: retro amber/orange phosphor ----------
@@ -82,7 +97,11 @@ export class World {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: window.devicePixelRatio < 2, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
+    this.scene.environment = makeEnvironment(this.renderer);
     this.scene.background = new THREE.Color(0x000002);
     this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 7000);
     this.scene.add(this.camera);
@@ -94,7 +113,13 @@ export class World {
     this.scene.add(this.point2);
     this.sunlight = new THREE.DirectionalLight(0xfff6e8, 0);
     this.sunlight.position.set(-60, 40, 30);
-    this.scene.add(this.sunlight);
+    this.sunlight.shadow.camera.left = -70; this.sunlight.shadow.camera.right = 70; this.sunlight.shadow.camera.top = 70; this.sunlight.shadow.camera.bottom = -70;
+    this.sunlight.shadow.camera.near = 1; this.sunlight.shadow.camera.far = 400; this.sunlight.shadow.bias = -0.0004; this.sunlight.shadow.normalBias = 0.04;
+    this.scene.add(this.sunlight); this.scene.add(this.sunlight.target);
+    // ceiling key light for the current deck: soft contact shadows under consoles, crew and kit
+    this.key = new THREE.SpotLight(0xfff8f0, 0, 24, 1.25, 0.6, 1.2);
+    this.key.shadow.camera.near = 0.5; this.key.shadow.camera.far = 12; this.key.shadow.bias = -0.0006; this.key.shadow.normalBias = 0.03;
+    this.scene.add(this.key); this.scene.add(this.key.target);
     this.decks = [];
     this.comps = {};
     this.avatars = {};
@@ -107,14 +132,28 @@ export class World {
     for (const d of DECKS) this.buildDeck(d);
     this.exterior = buildExterior(this.comps);
     this.exterior.position.y = EXT_DECK * DECK_H;
+    this.exterior.traverse((o) => { if (o.isMesh && !o.material.isMeshBasicMaterial && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } });
     this.scene.add(this.exterior);
     this.decks.push(this.exterior);
+    for (const g of this.decks.slice(0, 5)) g.traverse((o) => { if (o.isMesh && !o.material.isMeshBasicMaterial && !o.material.transparent) { o.castShadow = o.position.y > 0.05 || o.parent !== g; o.receiveShadow = true; } });
+    this.stationId = null; this.station = null; this.earth = null;
+    this.setQuality('medium');
     this.buildHandItem();
     this.setupScreens();
     this.screenInfo = null; // set by the game: (S, compId) => { title, lines, bars }
     this.scrT = 0; this.focus = null; this.focusT = 0; this.focusDir = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+  setQuality(q) {
+    this.quality = q;
+    const r = this.renderer, dpr = window.devicePixelRatio || 1;
+    r.setPixelRatio(q === 'low' ? 1 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(dpr, 2));
+    r.shadowMap.enabled = q !== 'low';
+    const ms = q === 'high' ? 2048 : 1024;
+    for (const L of [this.sunlight, this.key]) { L.castShadow = q !== 'low'; L.shadow.mapSize.set(ms, ms); if (L.shadow.map) { L.shadow.map.dispose(); L.shadow.map = null; } }
+    this.scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => (m.needsUpdate = true)); });
+    this.resize();
   }
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
@@ -287,6 +326,11 @@ export class World {
       v.screen.material.map = tex; v.screen.material.color.setHex(0xffffff); v.screen.material.needsUpdate = true;
       v.canvas = cv; v.tex = tex;
       drawScreen(cv, { title: COMPS[id].name.toUpperCase(), lines: [['BOOT', 'OK']] }, 'ok', 0);
+      v.extras = (v.group.userData.extras || []).map((mesh, k) => {
+        const pp = mesh.geometry.parameters, c2 = document.createElement('canvas'); c2.width = 320; c2.height = Math.round(320 / (pp.width / pp.height));
+        const t2 = new THREE.CanvasTexture(c2); t2.colorSpace = THREE.SRGBColorSpace; mesh.material.map = t2; mesh.material.needsUpdate = true;
+        return { canvas: c2, tex: t2, key: id + '#' + k };
+      });
     }
   }
   drawScreens(S, me, now, onlyBooting = false) {
@@ -315,6 +359,7 @@ export class World {
       try { info = this.screenInfo ? this.screenInfo(S, id) : null; } catch (e) { info = null; }
       drawScreen(v.canvas, info || { title: COMPS[id].name.toUpperCase(), bars: [['INTEGRITY', c.hp / 100, '']] }, st, now);
       v.tex.needsUpdate = true;
+      for (const x of v.extras || []) { let i2 = null; try { i2 = this.screenInfo ? this.screenInfo(S, x.key) : null; } catch (e) {} drawScreen(x.canvas, i2 || { title: '—' }, st, now); x.tex.needsUpdate = true; }
     }
   }
   // ---------- console focus: fly the camera square onto a screen ----------
@@ -388,6 +433,8 @@ export class World {
         this.camera.quaternion.slerp(pose.quat, e);
       }
     }
+    this.key.position.set(0, baseY + ROOM_H - 0.15, 0); this.key.target.position.set(0, baseY, 0);
+    this.sunlight.position.set(me.x - 60, baseY + 70, me.z + 40); this.sunlight.target.position.set(me.x, baseY, me.z);
     this.point.position.set(0, baseY + ROOM_H - 0.4, 0);
     this.point2.position.set(-Math.sin(me.yaw) * 4, baseY + ROOM_H - 0.5, -Math.cos(me.yaw) * 4);
     const red = S.alert === 'red', yel = S.alert === 'yellow';
@@ -396,10 +443,12 @@ export class World {
     const powerDim = blackout ? 0.22 : 1;
     const lc = blackout ? new THREE.Color(1, 0.42, 0.22) : red ? new THREE.Color(1, 0.35 + 0.3 * (1 - pulse), 0.3 + 0.3 * (1 - pulse)) : yel ? new THREE.Color(1, 0.93, 0.78) : new THREE.Color(1, 0.99, 0.96);
     const eva = deck === EXT_DECK;
-    this.point.color.copy(lc); this.point.intensity = eva ? 0 : 42 * powerDim;
-    this.point2.color.copy(lc); this.point2.intensity = eva ? 0 : 16 * powerDim;
-    this.hemi.intensity = eva ? 0.35 : 1.0 * powerDim;
-    this.sunlight.intensity = eva ? 2.6 : 0;
+    this.point.color.copy(lc); this.point.intensity = eva ? 0 : 26 * powerDim;
+    this.point2.color.copy(lc); this.point2.intensity = eva ? 0 : 12 * powerDim;
+    this.key.color.copy(lc); this.key.intensity = eva ? 0 : 55 * powerDim;
+    this.hemi.intensity = eva ? 0.25 : 0.75 * powerDim;
+    this.scene.environmentIntensity = eva ? 0.35 : 0.6 * powerDim;
+    this.sunlight.intensity = eva ? 3.2 : 0;
     if (eva) this.updateExterior(S, now, dt);
     this.decks[deck].traverse((o) => { if (o.userData.lamp) o.material.color.setRGB(lc.r * 0.95 * powerDim, lc.g * 0.95 * powerDim, lc.b * 0.95 * powerDim); });
 
@@ -420,10 +469,15 @@ export class World {
     else if (f > 0.97) pk = WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
     if (pk !== this.planetKind) {
       if (this.planet) { this.scene.remove(this.planet); this.planet = null; }
+      if (this.earth) { this.scene.remove(this.earth); this.earth = null; }
       this.planetKind = pk;
       if (pk) { this.planet = buildPlanet(pk); this.planet.scale.setScalar(pk === 'ganymede' ? 2600 : 1500); this.scene.add(this.planet); }
+      if (pk === 'luna') { this.earth = buildPlanet('earth'); this.earth.scale.setScalar(260); this.scene.add(this.earth); }
     }
-    if (this.planet) { this.planet.position.set(me.x - 2600, baseY - 900, me.z - 2200); this.planet.rotation.y = now * 0.004; }
+    const sunDir = new THREE.Vector3(-2600, 900, 1500).normalize();
+    if (this.planet) { this.planet.position.set(me.x - 2600, baseY - 900, me.z - 2200); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); }
+    if (this.earth) { this.earth.position.set(me.x + 1500, baseY + 600, me.z - 3600); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); }
+    this.updateStation(S, now);
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.5);
     this.battleFlash.material.opacity = this.flash;
     this.battleFlash.position.set(me.x + Math.sin(now) * 1200, baseY + 200, me.z - 2500);
@@ -459,6 +513,12 @@ export class World {
     }
     if (this.comps.fabricator && deck === 1) { const g = this.comps.fabricator.glow; g.visible = S.fab.queue.length > 0; g.rotation.y += dt * 3; }
     if (this.comps.cryo && deck === 3) this.comps.cryo.group.children.forEach((ch) => { if (ch.userData.pod !== undefined) ch.material.color.setHex(ch.userData.pod < S.pods ? 0x4aa0d8 : 0x101418); });
+    if (this.comps.helm && deck === 4) {
+      const st = this.comps.helm.group.userData.sticks, c = S.att.cmd || [0, 0, 0], t = S.att.tcmd || [0, 0, 0];
+      const k = Math.min(1, dt * 10);
+      st.rhc.rotation.x += (c[0] * 0.35 - st.rhc.rotation.x) * k; st.rhc.rotation.z += (c[1] * 0.35 - st.rhc.rotation.z) * k; st.rhc.rotation.y += (c[2] * 0.4 - st.rhc.rotation.y) * k;
+      st.thc.position.z += (0.98 - t[2] * 0.05 - st.thc.position.z) * k; st.thc.rotation.z += (-t[0] * 0.3 - st.thc.rotation.z) * k; st.thc.rotation.x += (t[1] * 0.3 - st.thc.rotation.x) * k;
+    }
     if (this.comps.dronebay && deck === 1) { const busy = S.drones.jobs.length; this.comps.dronebay.group.children.forEach((ch) => { if (ch.userData.drone !== undefined) { ch.visible = ch.userData.drone >= busy; ch.position.y = 0.4 + 0.05 * Math.sin(now * 2 + ch.userData.drone); } }); }
 
     this.scrT -= dt;
@@ -469,6 +529,26 @@ export class World {
     this.updateAvatars(S, me, deck, dt, now);
     if (me.item && !this.focus) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
     else this.hand.visible = false;
+  }
+  // Station visible from the hull during approach / docked (in the ship's body frame; our port is at the bow)
+  updateStation(S, now) {
+    const N = S.nav;
+    const near = N.state === 'orbit' || N.state === 'approach' || N.state === 'docking' || N.state === 'docked';
+    const wid = !near ? null : N.state === 'docked' ? WAYPOINTS[N.leg].id : WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
+    if (wid !== this.stationId) {
+      if (this.station) this.exterior.remove(this.station);
+      this.station = wid ? buildStation(wid) : null; this.stationId = wid;
+      if (this.station) { this.station.traverse((o) => { if (o.isMesh && o.material && !o.material.isMeshBasicMaterial) o.castShadow = o.receiveShadow = true; }); this.exterior.add(this.station); }
+    }
+    if (!this.station) return;
+    const PORT = new THREE.Vector3(0, -12, -89.5);
+    const q = new THREE.Quaternion(...(S.att.q || [0, 0, 0, 1])), qi = q.clone().invert();
+    let rel = new THREE.Vector3(0, 0, -2000);
+    if (N.state === 'approach' && S.prox) rel = new THREE.Vector3(-S.prox.p[0], -S.prox.p[1], -S.prox.p[2]);
+    else if (N.state === 'docking' || N.state === 'docked') rel.set(0, 0, 0);
+    this.station.position.copy(PORT).add(rel.applyQuaternion(qi));
+    this.station.quaternion.copy(qi);
+    this.station.userData.tick(now);
   }
   updateExterior(S, now, dt) {
     const hf = Math.min(1, S.heat.stored / 30000);

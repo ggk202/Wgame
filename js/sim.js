@@ -3,6 +3,7 @@ import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKE
 import { clamp, rand, randn, chance, pick, polar, compPos, log, fx } from './util.js';
 import { updateCombat, updateWeapons } from './combat.js';
 import { storyStep, updateVote, updateEffects } from './story.js';
+import { updateAttitude, updateProx, startApproach, nose, sasModes, kick } from './attitude.js';
 import { legLength } from './state.js';
 
 const INTERNAL = COMP_IDS.filter((id) => !COMPS[id].ext);
@@ -49,7 +50,9 @@ export function step(S, dt) {
   updatePower(S, dt);
   updateReactor(S, dt, dtg);
   updateHeat(S, dt);
+  if (S.nav.state === 'docked' || S.nav.state === 'docking') { S.att.w = [0, 0, 0]; } else updateAttitude(S, dt);
   updateDrive(S, dt, dtg);
+  if (S.nav.state === 'approach') updateProx(S, dt, (r) => onCapture(S, r), (r, hard) => onCollide(S, r, hard));
   updateLife(S, dt, dtg);
   updateWeapons(S, dt);
   updateCombat(S, dt);
@@ -244,11 +247,34 @@ function updateHeat(S, dt) {
 }
 
 // ---------- drive & navigation ----------
+// Flip = an attitude maneuver flown by the SAS (if the difficulty provides one).
 export function startFlip(S) {
-  const D = S.drive;
-  if (D.flip > 0) return;
-  D.flip = 20; D.cmdG = 0;
-  log(S, D.orient > 0 ? 'Flip maneuver: turning drive to retrograde' : 'Flip maneuver: turning drive to prograde', 'info');
+  if (!sasModes(S).includes('pro')) return 'No attitude autopilot at this difficulty. Flip by hand with the RCS.';
+  const want = S.drive.orient >= 0 ? 'retro' : 'pro';
+  S.att.mode = want; S.drive.cmdG = 0;
+  log(S, want === 'retro' ? 'Flip maneuver: slewing nose to retrograde' : 'Flip maneuver: slewing nose to prograde', 'info');
+  return null;
+}
+function onCapture(S, r) {
+  S.nav.state = 'docking'; S.nav.dockT = 8; S.prox = null; S.att.q = [0, 0, 0, 1]; S.att.w = [0, 0, 0];
+  log(S, `SOFT CAPTURE: lateral ${r.lateral.toFixed(2)} m, ${r.closing.toFixed(2)} m/s, ${r.ang.toFixed(1)}°, roll ${r.roll.toFixed(1)}°. Hard-dock latches driving…`, 'good');
+  fx(S, 'dock');
+}
+function onCollide(S, r, hard) {
+  if (hard) {
+    const dmg = 6 + r.closing * 18 + r.lateral * 4;
+    S.hull = Math.max(0, S.hull - dmg * 0.35 * S.settings.dmg);
+    const victims = ['helm', 'navcomp', 'sensors', 'comms', 'antenna', 'sensorArray', 'pdc1', 'pdc2'];
+    const v = victims[Math.floor(Math.random() * victims.length)];
+    S.comps[v].hp = Math.max(0, S.comps[v].hp - dmg);
+    for (const p of Object.values(S.players)) if (p.state === 'alive' && !p.seat && p.deck >= 3) p.hp -= dmg * 0.4;
+    log(S, `COLLISION with the station at ${r.closing.toFixed(2)} m/s, ${r.lateral.toFixed(1)} m off-axis! ${COMPS[v].name} damaged.`, 'bad');
+    fx(S, 'hit', { deck: 4, power: 0.8 });
+  } else {
+    const why = r.lateral >= 0.35 ? `${r.lateral.toFixed(2)} m off-centre` : r.closing >= 0.25 ? `too fast (${r.closing.toFixed(2)} m/s)` : r.ang >= 3 ? `misaligned ${r.ang.toFixed(1)}°` : `hatch rolled ${r.roll.toFixed(1)}°`;
+    log(S, `Contact: soft capture failed, ${why}. Rebounding. Back off and line up again.`, 'warn');
+    fx(S, 'hit', { deck: 4, power: 0.2 });
+  }
 }
 function autopilot(S, dt) {
   const N = S.nav, D = S.drive;
@@ -258,30 +284,37 @@ function autopilot(S, dt) {
   const aPlan = gPlan * G0;
   const vCruise = N.plan.cruise * 1000;
   const vToward = N.v * dir;
-  const flipCoast = D.orient === dir ? Math.max(0, vToward) * 20 * S.warp : 0;
+  const flipCoast = D.orient === dir ? Math.max(0, vToward) * 22 * S.warp : 0;
   const dist = Math.max(0, Math.abs(rem) - flipCoast);
   const vDes = Math.min(vCruise, Math.sqrt(2 * aPlan * 0.9 * dist));
   const dv = vDes - vToward;
   const dtg = dt * S.warp;
   const needOrient = dv >= 0 ? dir : -dir;
   if (!D.ignited) { if (eff(S, 'drivecore') > 0 && S.mass.rmass > 0 && eff(S, 'injector') > 0) { D.ignited = true; log(S, 'Autopilot: drive ignition', 'info'); } else return; }
-  if (D.flip > 0) return;
-  if (D.orient !== needOrient) {
-    if (Math.abs(dv) > aPlan * 120) startFlip(S); else D.cmdG = 0;
-    return;
+  const wantMode = needOrient > 0 ? 'pro' : 'retro';
+  if (Math.abs(dv) < aPlan * 2) { D.cmdG = 0; return; }
+  if (S.att.mode !== wantMode) {
+    if (D.orient !== needOrient && Math.abs(dv) <= aPlan * 120) { D.cmdG = 0; return; }
+    S.att.mode = wantMode;
+    if (D.orient !== needOrient) log(S, `Autopilot: slewing to ${wantMode === 'pro' ? 'prograde' : 'retrograde'}`, 'info');
   }
-  D.cmdG = Math.abs(dv) < aPlan * 2 ? 0 : Math.min(gPlan, Math.abs(dv) / dtg / G0);
+  if (S.att.err > 3) { D.cmdG = 0; return; }
+  D.cmdG = Math.min(gPlan, Math.abs(dv) / dtg / G0);
 }
 function updateDrive(S, dt, dtg) {
   const D = S.drive, N = S.nav, M = S.mass;
-  if (D.flip > 0) {
-    D.flip -= dt;
-    if (D.flip <= 0) { D.flip = 0; D.orient *= -1; log(S, `Flip complete — drive now ${D.orient > 0 ? 'PROGRADE' : 'RETROGRADE'}`, 'good'); }
-  }
+  // the drive pushes along the nose; only the component along the nav axis counts
+  const along = -nose(S.att.q)[2];
+  const prevOrient = D.orient;
+  D.orient = along > 0.866 ? 1 : along < -0.866 ? -1 : 0;
+  D.along = along;
+  D.flip = (S.att.mode === 'pro' || S.att.mode === 'retro') && S.att.err > 3 ? S.att.err : 0;
+  if (prevOrient === 0 && D.orient !== 0 && N.state === 'transit') log(S, `Nose aligned ${D.orient > 0 ? 'PROGRADE' : 'RETROGRADE'}`, 'good');
+  if (N.state !== 'transit' && D.ignited) { D.ignited = false; D.cmdG = 0; }
   if (N.state === 'transit' && N.autopilot && S.settings.autopilot && eff(S, 'navcomp') > 0 && eff(S, 'helm') > 0 && D.locked <= 0) autopilot(S, dt);
   const m = massKg(S);
   const maxA = SHIP.thrust / m;
-  D.want = D.ignited && D.flip <= 0 ? clamp((D.cmdG * G0) / maxA, 0, 1) : 0;
+  D.want = D.ignited ? clamp((D.cmdG * G0) / maxA, 0, 1) : 0;
   if (D.locked > 0) { D.locked -= dt; D.want = D.lockedThr; if (D.locked <= 0) log(S, 'Throttle valve freed', 'good'); }
   let thr = D.want;
   if (S.comps.drivecore.hp <= 0 || !D.ignited) thr = 0;
@@ -297,7 +330,7 @@ function updateDrive(S, dt, dtg) {
   const jink = D.evasive && D.ignited && eff(S, 'drivecore') > 0 && M.rmass > 0;
   D.g = a / G0 + (jink ? 1.2 : 0);
   if (N.state === 'transit') {
-    N.v += D.orient * a * dtg;
+    N.v += along * a * dtg;
     N.x += N.v * dtg;
   }
   const ve = SHIP.ve * (1 - 0.3 * M.contam);
@@ -309,7 +342,7 @@ function updateDrive(S, dt, dtg) {
   const rem = N.L - N.x;
   if (N.state === 'transit' && Math.abs(rem) < 5e8 && Math.abs(N.v) < 6000) {
     N.state = 'orbit'; N.v = 0; D.ignited = false; D.cmdG = 0;
-    log(S, `Arrived: holding orbit at ${WAYPOINTS[N.leg + 1].name}. Request docking from the helm.`, 'good');
+    log(S, `Arrived: holding orbit at ${WAYPOINTS[N.leg + 1].name}. Request an approach slot at the helm, then fly the docking by hand.`, 'good');
     fx(S, 'chime');
   }
   if (N.state === 'docking') {
@@ -328,7 +361,10 @@ export function depart(S) {
   const N = S.nav;
   if (N.state !== 'docked' || N.leg >= WAYPOINTS.length - 1) return false;
   N.state = 'transit'; N.x = 0; N.v = 0; N.L = legLength(N.leg);
-  S.drive.orient = 1; S.drive.cmdG = 0; S.drive.flip = 0;
+  S.drive.cmdG = 0; S.drive.flip = 0;
+  // undock: pushed off pointing back out along the departure axis; the next leg's target is ahead (-Z)
+  S.att.q = [0, 0, 0, 1]; S.att.w = [0, 0, 0];
+  if (S.att.mode === 'off' && sasModes(S).includes('hold')) S.att.mode = 'hold';
   log(S, `Undocked from ${WAYPOINTS[N.leg].name}. Course laid in for ${WAYPOINTS[N.leg + 1].name}.`, 'info');
   S.story.nextAt = S.t + 60;
   return true;

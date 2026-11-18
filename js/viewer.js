@@ -2,6 +2,9 @@
 import * as THREE from 'three';
 import { COMPS, COMP_IDS, DECKS, ROOM_H } from './config.js';
 import { World, buildComp, buildFire, buildAvatar, buildExterior, textSprite } from './world.js';
+import { buildShip, buildStation } from './npc.js';
+import { buildPlanet } from './planet.js';
+let tickFn = null;
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#vc');
@@ -24,6 +27,21 @@ CATS.push({ title: 'Crew & fixtures', items: [
   { id: 'crew', name: 'Crew member', sub: 'Shipboard clothes', kind: 'avatar' },
   { id: 'crew-suit', name: 'Crew member (vacuum suit)', sub: 'Helmet + life-support pack', kind: 'avatar', suit: true },
   { id: 'fire', name: 'Fire effect', sub: 'Shown on burning components', kind: 'fire' },
+] });
+CATS.push({ title: 'Other ships', items: [
+  { id: 'corvette', name: 'Pirate corvette', sub: '58 m · railgun + missiles', kind: 'npc' },
+  { id: 'gunship', name: 'Gunship', sub: '80 m · twin railguns', kind: 'npc' },
+  { id: 'frigate', name: 'Blockade frigate', sub: '110 m · heavy missiles', kind: 'npc' },
+  { id: 'drone', name: 'Hijacked mining drone', sub: '30 m · kamikaze', kind: 'npc' },
+] });
+CATS.push({ title: 'Stations & worlds', items: [
+  { id: 'luna', name: 'Shackleton Yard', sub: 'Luna orbit · shipyard', kind: 'station' },
+  { id: 'phobos', name: 'Phobos Station', sub: 'Mars', kind: 'station' },
+  { id: 'ceres', name: 'Ceres Ring', sub: 'Belt · spin ring', kind: 'station' },
+  { id: 'ganymede', name: 'Ganymede High', sub: 'Jupiter · twin rings', kind: 'station' },
+  { id: 'earth', name: 'Earth', sub: 'Atmospheric scattering + clouds', kind: 'planet' },
+  { id: 'phobos', name: 'Mars', sub: 'Thin dusty atmosphere', kind: 'planet' },
+  { id: 'ganymede', name: 'Jupiter', sub: 'Banded clouds', kind: 'planet' },
 ] });
 CATS.push({ title: 'Whole decks', items: [{ id: 'exterior', name: 'EXTERIOR', sub: 'Hull, spine & drive (EVA area)', kind: 'exterior' }, ...DECKS.slice().reverse().map((d) => ({ id: 'deck' + d.id, name: d.full.split('— ')[1], sub: `Deck ${d.id}`, kind: 'deck', deck: d.id }))] });
 
@@ -56,6 +74,7 @@ function show(it) {
   for (const c of CATS) for (const x of c.items) x.btn.classList.toggle('sel', x === it);
   root = new THREE.Group();
   let info = '';
+  tickFn = null;
   if (it.kind === 'comp') {
     built = buildComp(COMPS[it.id].mesh, accentOf(it.id));
     root.add(built.group);
@@ -70,6 +89,20 @@ function show(it) {
   } else if (it.kind === 'fire') {
     fireFx = buildFire(); fireFx.visible = true; root.add(fireFx);
     info = `<h2>Fire</h2><p>Grows with oxygen, spreads to nearby systems above 50% intensity, and is put out with an extinguisher, suppressant, or by venting the deck.</p>`;
+  } else if (it.kind === 'npc') {
+    const m = buildShip(it.id); root.add(m);
+    for (const p of m.userData.plumes) p.visible = true;
+    tickFn = (now) => { for (const p of m.userData.plumes) p.scale.setScalar(0.9 + 0.2 * Math.sin(now * 40 + p.id)); m.traverse((o) => { if (o.userData.blink) o.visible = Math.sin(now * 3 + o.id) > 0; }); };
+    info = `<h2>${it.name}</h2><p>${it.sub}. Seen in combat through the optical telescope on the Fire Control and Sensor consoles: watch its attitude thrusters, drive plume and muzzle flashes. Its weapons bear along its nose, like ours.</p>`;
+  } else if (it.kind === 'station') {
+    const st = buildStation(it.id); root.add(st);
+    tickFn = (now) => st.userData.tick(now);
+    info = `<h2>${it.name}</h2><p>${it.sub}. Docking is flown by hand: bring the bow port onto the docking target (white disc with a black standoff cross) inside the capture window.</p>`;
+  } else if (it.kind === 'planet') {
+    const p = buildPlanet(it.id); p.scale.setScalar(6); root.add(p);
+    const sun = new THREE.Vector3();
+    tickFn = (now) => { sun.copy(camera.position).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.9).normalize(); p.userData.setSun(sun); p.userData.tick(now); };
+    info = `<h2>${it.name}</h2><p>${it.sub}. Shader-lit with a day/night terminator, limb scattering and a separate drifting cloud layer.</p>`;
   } else if (it.kind === 'exterior') {
     const comps = {};
     root.add(buildExterior(comps));
@@ -92,7 +125,7 @@ function show(it) {
   orbit.target.copy(ctr);
   if (it.kind === 'exterior') { orbit.target.set(0, -8, -8); orbit.dist = 175; orbit.pitch = 0.45; }
   else { orbit.dist = Math.max(2.2, Math.max(size.x, size.y, size.z) * (it.kind === 'deck' ? 1.25 : 1.9)); orbit.pitch = it.kind === 'deck' ? 0.85 : 0.35; }
-  grid.visible = it.kind !== 'deck' && it.kind !== 'exterior';
+  grid.visible = it.kind !== 'deck' && it.kind !== 'exterior' && it.kind !== 'planet' && it.kind !== 'station';
   $('#info').innerHTML = info;
   $('#ctl-cond').style.display = it.kind === 'comp' || it.kind === 'deck' || it.kind === 'exterior' ? '' : 'none';
   $('#t-fire').style.display = it.kind === 'comp' && !COMPS[it.id].ext ? '' : 'none';
@@ -121,11 +154,11 @@ canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId); if (!p) return;
   if (pointers.size === 1) { orbit.yaw -= (e.clientX - p.x) * 0.008; orbit.pitch = Math.max(-0.2, Math.min(1.5, orbit.pitch + (e.clientY - p.y) * 0.006)); opt.spin = false; $('#t-spin').classList.remove('sel'); }
   p.x = e.clientX; p.y = e.clientY;
-  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orbit.dist = Math.max(1, Math.min(320, (dist0 * pinch0) / d)); }
+  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) orbit.dist = Math.max(1, Math.min(600, (dist0 * pinch0) / d)); }
 });
 const up = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch0 = 0; };
 canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(1, Math.min(320, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(1, Math.min(600, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1))); }, { passive: false });
 
 function resize() {
   const r = canvas.getBoundingClientRect();
@@ -138,6 +171,7 @@ function frame(t) {
   requestAnimationFrame(frame);
   const now = t / 1000, dt = Math.min(0.05, now - last); last = now;
   if (opt.spin) orbit.yaw += dt * 0.35;
+  if (tickFn) tickFn(now);
   const cp = Math.cos(orbit.pitch);
   camera.position.set(orbit.target.x + Math.sin(orbit.yaw) * cp * orbit.dist, orbit.target.y + Math.sin(orbit.pitch) * orbit.dist, orbit.target.z + Math.cos(orbit.yaw) * cp * orbit.dist);
   camera.lookAt(orbit.target);

@@ -2,6 +2,7 @@
 import { COMPS, COMP_IDS, ITEMS, RECIPES, LOCKERS, STATION_PRICES, SHIP, DECKS, WAYPOINTS, ROOM_R, EXT_DECK, deckName } from './config.js';
 import { clamp, polar, compPos, compDeck, log, fx, rand } from './util.js';
 import { eff, startFlip, depart, scram, maxG, igniteComp } from './sim.js';
+import { startApproach, sasModes } from './attitude.js';
 import { fireRail, launchTorpedo, deployChaff, startEncounter, applyHit, addBreach } from './combat.js';
 import { castVote, pirateDemand, fireEvent } from './story.js';
 import { EVENTS } from './events.js';
@@ -85,7 +86,18 @@ export function applyAction(S, pid, a, args = {}) {
       D.ignited = true; log(S, `${p.name}: drive ignition`, 'info'); fx(S, 'ignite'); return;
     case 'helm.cutoff': if (!at(S, p, ['helm', 'drivectl', 'drivecore'])) return; D.ignited = false; D.cmdG = 0; N.autopilot = false; log(S, `${p.name}: drive cut-off`, 'info'); return;
     case 'helm.g': if (!at(S, p, ['helm', 'drivectl', 'drivecore'])) return; D.cmdG = clamp(+args.g || 0, 0, maxG(S)); N.autopilot = false; return;
-    case 'helm.flip': if (!at(S, p, ['helm', 'drivectl'])) return; N.autopilot = false; startFlip(S); return;
+    case 'helm.flip': { if (!at(S, p, ['helm', 'drivectl'])) return; N.autopilot = false; const e = startFlip(S); if (e) err(e); return; }
+    case 'att.mode':
+      if (!at(S, p, ['helm', 'drivectl'])) return;
+      if (!sasModes(S).includes(args.m)) return err('That SAS mode is not available at this difficulty');
+      if (args.m === 'target' && !S.sensors.lock) return err('No target lock: lock a contact at Sensors or Fire Control first');
+      S.att.mode = args.m; if (N.autopilot && args.m !== 'pro' && args.m !== 'retro') N.autopilot = false; return;
+    case 'att.cmd': {
+      if (!at(S, p, 'helm')) return;
+      const r = (args.r || [0, 0, 0]).map((x) => clamp(+x || 0, -1, 1)), t = (args.t || [0, 0, 0]).map((x) => clamp(+x || 0, -1, 1));
+      if (r.some((x) => x) && N.autopilot) { N.autopilot = false; log(S, 'Autopilot disengaged: manual attitude control', 'warn'); }
+      S.att.cmd = r; S.att.tcmd = t; S.att.cmdT = S.t; return;
+    }
     case 'helm.autopilot':
       if (!at(S, p, 'helm')) return;
       if (!S.settings.autopilot) return err('No autopilot at this difficulty');
@@ -96,7 +108,11 @@ export function applyAction(S, pid, a, args = {}) {
     case 'helm.dock':
       if (!at(S, p, ['helm', 'comms'])) return;
       if (N.state !== 'orbit') return err('Not in orbit');
-      N.state = 'docking'; N.dockT = 15; log(S, 'Docking clearance granted. Station tugs closing.', 'info'); return;
+      startApproach(S); return;
+    case 'helm.reapproach':
+      if (!at(S, p, 'helm')) return;
+      if (N.state !== 'approach') return;
+      startApproach(S); log(S, 'Approach reset: backing out to the 400 m hold point', 'info'); return;
     case 'helm.depart':
       if (!at(S, p, ['helm', 'comms'])) return;
       if (!depart(S)) err('Cannot depart'); return;
@@ -322,6 +338,8 @@ function debugAction(S, p, a, args) {
     case 'debug.fire': igniteComp(S, args.id || 'reactor', 0.5); break;
     case 'debug.storyNext': S.story.nextAt = S.t; break;
     case 'debug.endEnc': if (S.enc) for (const e of S.enc.enemies) e.dead = true; break;
+    case 'debug.dock': if (S.nav.state === 'approach') { S.prox.p = [0, 0, 0.5]; S.prox.v = [0, 0, -0.1]; S.att.q = [0, 0, 0, 1]; S.att.w = [0, 0, 0]; S.att.mode = 'off'; } else if (S.nav.state === 'orbit') startApproach(S); break;
+    case 'debug.approach': if (S.nav.state === 'transit') { S.nav.x = S.nav.L - 1e8; S.nav.v = 0; } break;
   }
 }
 

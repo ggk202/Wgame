@@ -88,6 +88,29 @@ export class Builder {
     const g = c.getContext('2d'); g.scale(2, 2);
     return this._add(c, (S) => { g.clearRect(0, 0, w, h); draw(g, S, w, h); });
   }
+  view(mode, showFn) {
+    const e = document.createElement('div'); e.className = 'viewhost';
+    let attached = false;
+    return this._add(e, (S) => {
+      const on = showFn ? showFn(S) : true;
+      e.style.display = on ? '' : 'none';
+      if (on && !attached && this.ctx.attachView) { this.ctx.attachView(e, mode); attached = true; }
+      if (!on) attached = false;
+    });
+  }
+  pad(label, keys, showFn) { // hold buttons: keys = [[text, axisGroup('r'|'t'), index, value], ...]
+    const e = document.createElement('div'); e.className = 'kv pad';
+    e.innerHTML = `<label>${label}</label><div class="padbtns"></div>`;
+    const box = e.querySelector('.padbtns');
+    for (const [txt, grp, idx, val] of keys) {
+      const b = document.createElement('button'); b.className = 'btn padb'; b.textContent = txt;
+      const set = (on) => { b.classList.toggle('sel', on); this.ctx.pilotPress && this.ctx.pilotPress(grp, idx, on ? val : 0); };
+      b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); b.setPointerCapture && b.setPointerCapture(ev.pointerId); set(true); });
+      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(t, () => set(false));
+      box.appendChild(b);
+    }
+    return this._add(e, (S) => { if (showFn) e.style.display = showFn(S) ? '' : 'none'; });
+  }
   update(S) { for (const w of this.ws) w(S); }
 }
 
@@ -219,7 +242,8 @@ export class HUD {
       const eta = Math.abs(N.v) > 10 ? rem / N.v : Infinity;
       navLine = `→ ${dest.name.split(',')[0]} · ${fmtDist(rem)} · ${(N.v / 1000).toFixed(0)} km/s${eta > 0 && eta < 1e9 ? ` · ETA ${fmtGameTime(eta)}` : ''}`;
     } else if (N.state === 'docked') navLine = `DOCKED at ${WAYPOINTS[N.leg].name.split(',')[0]}`;
-    else navLine = N.state === 'orbit' ? `ORBIT — request docking` : `DOCKING…`;
+    else if (N.state === 'approach' && S.prox) navLine = `APPROACH ${Math.max(0, S.prox.p[2]).toFixed(0)} m · ${(-S.prox.v[2]).toFixed(2)} m/s · off-axis ${Math.hypot(S.prox.p[0], S.prox.p[1]).toFixed(1)} m`;
+    else navLine = N.state === 'orbit' ? `ORBIT — request approach at the helm` : `DOCKING: latches driving…`;
     const pw = S.power;
     const battPct = S.battery.charge / (pw.cap || SHIP.batteryMWh);
     const ab = S.alert;
@@ -227,7 +251,7 @@ export class HUD {
     this.alertEl.textContent = ab === 'red' ? 'RED ALERT' : ab === 'yellow' ? 'CAUTION' : 'CONDITION GREEN';
     this.ship.innerHTML = `
       <div class="sl"><span>NAV</span><b>${navLine}</b></div>
-      <div class="sl"><span>DRIVE</span><b class="${S.drive.ignited ? 'good' : ''}">${S.drive.flip > 0 ? 'FLIPPING' : S.drive.ignited ? `${S.drive.g.toFixed(2)} g ${S.drive.orient > 0 ? 'PRO' : 'RETRO'}` : 'COLD'}${N.autopilot && S.settings.autopilot ? ' · AUTO' : ''} · RM ${S.mass.rmass.toFixed(0)} t</b></div>
+      <div class="sl"><span>DRIVE</span><b class="${S.drive.ignited ? 'good' : ''}">${S.drive.flip > 0 ? `SLEWING ${Math.round(S.drive.flip)}°` : S.drive.ignited ? `${S.drive.g.toFixed(2)} g ${S.drive.orient > 0 ? 'PRO' : S.drive.orient < 0 ? 'RETRO' : 'OFF-AXIS'}` : 'COLD'} · SAS ${S.att.mode.toUpperCase()}${N.autopilot && S.settings.autopilot ? ' · AUTO' : ''} · RM ${S.mass.rmass.toFixed(0)} t</b></div>
       <div class="sl"><span>REACTOR</span><b class="${R.state === 'running' ? (R.stab < 0.4 ? 'bad' : 'good') : 'bad'}">${R.state.toUpperCase()} ${R.state === 'running' ? Math.round(pw.gen) + ' MW · stab ' + Math.round(R.stab * 100) + '%' : ''}</b></div>
       <div class="sl"><span>POWER</span>${bar(battPct, cls(battPct, 0.3, 0.1), `BATT ${Math.round(battPct * 100)}%${pw.deficit > 0.5 ? ' · SHEDDING ' + pw.deficit.toFixed(0) + ' MW' : ''}`)}</div>
       <div class="sl"><span>HEAT</span>${bar(hf, cls(hf, 0.7, 0.9, true), `${Math.round(hf * 100)}% · rad ${S.heat.radExt ? 'EXT' : 'RET'}`)}</div>

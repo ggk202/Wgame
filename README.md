@@ -22,6 +22,19 @@ The ship and crew follow an ISS-era, NASA-style look. It's built entirely from p
 * **Interior:** off-white equipment racks with placards, ISS-yellow handrails, strapped stowage bags, cable trays, laptop workstations and blue crew seats.
 * **Crew:** casual crew wear a polo in their player colour. Suited crew wear a white EMU-style spacesuit with a life-support backpack, chest control module, gold sun visor, helmet lights and colour-coded identification stripes. In first person, a helmet frame appears while suited.
 
+**Rendering:** PBR materials with an image-based environment, filmic tone mapping, soft shadow maps from each deck's ceiling key light and from the Sun on EVA. Planets are shader-lit with a day/night terminator, atmospheric limb scattering and a separately drifting procedural cloud layer. Menu → Graphics sets Low (no shadows), Medium (the tablet default) or High.
+
+## Flying the ship
+
+The ship has a full rotational state. Its quaternion attitude and angular rates are driven by RCS thrusters, and the main drive pushes along wherever the nose points.
+
+* **Helm station:** a wraparound desk with a main console, attitude and docking side screens, a pilot couch, and hand controllers that move with your inputs. While seated: `W/S` pitch, `A/D` yaw, `Q/E` roll, `X` kills rotation (SAS Hold). On-screen hold buttons do the same on touch.
+* **SAS modes:** Off, Hold, Prograde, Retrograde, Target and Dock-align, depending on difficulty. Recruit and Spacer get all of them. Veteran gets Hold only, so pointing is by hand. Newtonian gets none, so every rotation you start you must stop yourself. Any stick input overrides SAS on that axis. The 180° flip needs a pointing SAS; without one, you fly it by hand.
+* **Docking is manual.** Request an approach in orbit and you start about 200 m from the station with sideways drift and misalignment. Fly the docking-camera view with RCS translation (`I/K` forward/back, `J/L` left/right, `U/O` up/down) and rotation. You need to centre the standoff cross on the target and touch the port inside the capture window: < 0.35 m off-axis, < 0.25 m/s, < 3° and roll < 5°. Missing it bounces you off, and doing so hard damages the bow and nearby systems. Recruit and Spacer get a predicted-contact marker and a recommended closing speed. Newtonian shows only range and closing speed.
+* **Combat geometry:** the spinal railgun fires only along the nose, within 1.5° of the target. Nose-on, the ship also presents a much smaller silhouette, and rotating spoils enemy firing solutions. Railgun recoil and hits knock the ship's attitude.
+
+**Combat telescope:** Fire Control and Sensors show an optical telescope locked on the target. Enemy ships (corvettes, gunships, frigates, drones) are modelled and seen turning on RCS, burning their drives, and firing: muzzle flashes, incoming slugs and missiles, PDC tracers, hits and explosions. A boresight marker shows where our railgun points, with RAIL SOLUTION when it bears.
+
 ## Consoles
 
 Every screen on the ship is live, showing its system's readouts in a retro amber/orange phosphor style. Pressing **E** on a console flies the camera square onto its screen and releases the mouse, so you use the full interface directly on that screen. Leave with the **EXIT CONSOLE** button below it, `Esc` or `E`. Lockers, the lift and the Tab status view open as free-standing terminals in the same style. Consoles power up with a CRT warm-up and POST boot sequence. Mechanical relays clack while they boot and chatter quietly while idle, and every screen in a room re-boots in a relay cascade when power comes back after a blackout.
@@ -59,6 +72,7 @@ Every screen on the ship is live, showing its system's readouts in a retro amber
 | Automatic fire sprinklers | ✓ | – | – | – |
 | Automatic point defence | ✓ | ✓ | ✓ | – |
 | Nanite repair | fast + seals small breaches | slow | – | – |
+| SAS (attitude autopilot) | all modes + dock align | all modes | hold only | none |
 | Backup crew in cryo | 8 | 5 | 3 | 1 |
 
 Storytellers: **Cassiopeia** (steady escalation), **Halley** (merciful), **Kessler** (chaotic). Each leg also has scripted beats: a distress call, a pirate ambush, a proton storm, a drone swarm and a final blockade.

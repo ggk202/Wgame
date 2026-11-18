@@ -276,3 +276,12 @@ body.touch #panel .btn { padding: 9px 13px; }
 #panel.booting .pbody, #panel.booting .phead { visibility: hidden; }
 #panel.booted .pbody, #panel.booted .phead { animation: bootflash 0.35s ease-out; }
 @keyframes bootflash { 0% { filter: brightness(2.2) blur(1px); } 100% { filter: none; } }
+/* external optical views and pilot pads inside consoles */
+#panel .viewhost { margin: 4px 0 8px; }
+.extview { position: relative; width: 100%; border: 1px solid var(--amb-d); background: #000; }
+.extview canvas { display: block; width: 100%; }
+.extview canvas + canvas { position: absolute; left: 0; top: 0; pointer-events: none; width: 100%; }
+#panel .pad { grid-template-columns: 200px 1fr; }
+#panel .padbtns { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+#panel .padb { padding: 8px 2px; font-size: 11px; touch-action: none; }
+.optrow select { font: inherit; background: #0c1620; color: var(--text); border: 1px solid #2c445c; border-radius: 6px; padding: 4px; }

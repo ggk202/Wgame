@@ -45,6 +45,8 @@ export function createState(opts = {}) {
     drive: { ignited: false, cmdG: 0, want: 0, throttle: 0, acc: 0, g: 0, orient: 1, flip: 0, evasive: false, maneuver: 'hold', locked: 0, lockedThr: 0 },
     mass: { rmass: SHIP.rmassMax, pellets: SHIP.pellets, contam: 0 },
     nav: { leg: 0, x: 0, v: 0, L: legLength(0), state: 'docked', autopilot: D.autopilot, plan: { cruise: 600, g: 0.3 }, dockT: 0, adriftT: 0 },
+    att: { q: [0, 0, 0, 1], w: [0, 0, 0], mode: D.sas === 'none' ? 'off' : 'hold', cmd: [0, 0, 0], tcmd: [0, 0, 0], cmdT: 0, err: 0, rcs: false },
+    prox: null,
     life: { o2: 1200, n2: 3500, water: 3000, food: 160, electrolysis: true, sat: 0.15, regen: 0, suppressant: 4 },
     stores: { spares: 10, patch: 6, medkit: 6, cartridge: 3, feedstock: 300, missiles: 6, slugs: 30, pdcAmmo: 6000, chaff: 4 },
     fab: { queue: [] },

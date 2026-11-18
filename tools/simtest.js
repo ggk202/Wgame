@@ -26,6 +26,7 @@ function run(diff, minutes, { god = true, fireAll = false } = {}) {
     step(S, dt);
     if (S.vote) { for (const p of Object.values(S.players)) applyAction(S, p.id, 'vote', { opt: S.vote.options[0].id }); }
     if (S.nav.state === 'orbit') { S.players.p1.seat = 'helm'; applyAction(S, 'p1', 'helm.dock'); }
+    if (S.nav.state === 'approach' && S.prox.t > 5 && (S.prox.dbg || 0) < S.prox.t - 15) { applyAction(S, 'p1', 'debug.dock'); S.prox.dbg = S.prox.t; }
     if (S.nav.state === 'docked' && S.phase === 'play') { legs++; S.players.p1.seat = 'helm'; applyAction(S, 'p1', 'helm.depart'); S.nav.autopilot = true; }
     // keep ship alive-ish for soak: auto-repair everything slowly in god mode
     if (god && i % 600 === 0) { for (const c of Object.values(S.comps)) { c.hp = Math.min(100, c.hp + 30); c.fire = 0; c.fault = 0; } S.breaches = []; S.hull = Math.max(S.hull, 60); }

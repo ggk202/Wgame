@@ -46,7 +46,7 @@ export const DECKS = [
 // power = base MW, wear = hp lost per real minute at wear x1, prio = default power priority (1 = critical)
 export const COMPS = {
   // Bridge
-  helm:       { name: 'Helm Station', deck: 4, a: 0, r: 8.6, mesh: 'console', fp: 0.9, panel: 'helm', power: 0.3, wear: 0.3, prio: 1, computer: true },
+  helm:       { name: 'Helm Station', deck: 4, a: 0, r: 8.4, mesh: 'helm', fp: 1.3, panel: 'helm', power: 0.3, wear: 0.3, prio: 1, computer: true },
   navcomp:    { name: 'Navigation Computer', deck: 4, a: 45, r: 8.6, mesh: 'console', fp: 0.9, panel: 'nav', power: 0.5, wear: 0.3, prio: 2, computer: true },
   tactical:   { name: 'Fire Control', deck: 4, a: -45, r: 8.6, mesh: 'console', fp: 0.9, panel: 'tactical', power: 0.4, wear: 0.3, prio: 2, computer: true },
   sensors:    { name: 'Sensor Suite', deck: 4, a: 100, r: 8.6, mesh: 'console', fp: 0.9, panel: 'sensors', power: 2, wear: 0.4, prio: 2, computer: true },
@@ -125,22 +125,22 @@ export const RECIPES = {
 export const DIFFICULTY = {
   recruit: {
     name: 'Recruit', desc: 'Heavy automation. Nanites repair components and seal small breaches. Plenty of backup crew.',
-    autopilot: true, autoPower: true, autoReactor: 'full', autoRadiators: true, autoFire: true, autoPDC: true,
+    autopilot: true, sas: 'full', autoPower: true, autoReactor: 'full', autoRadiators: true, autoFire: true, autoPDC: true,
     nanites: 2.0, naniteBreach: true, wear: 0.45, threat: 0.6, pods: 8, dmg: 0.7,
   },
   spacer: {
-    name: 'Spacer', desc: 'Autopilot, load balancing and reactor assist. Slow nanite maintenance. Fires are on you.',
-    autopilot: true, autoPower: true, autoReactor: 'assist', autoRadiators: true, autoFire: false, autoPDC: true,
+    name: 'Spacer', desc: 'Autopilot and attitude autopilot, load balancing, reactor assist. Slow nanite maintenance. Fires and docking are on you.',
+    autopilot: true, sas: 'full', autoPower: true, autoReactor: 'assist', autoRadiators: true, autoFire: false, autoPDC: true,
     nanites: 0.8, naniteBreach: false, wear: 0.75, threat: 0.85, pods: 5, dmg: 0.85,
   },
   veteran: {
-    name: 'Veteran', desc: 'Manual flight, reactor and power. Point defence still runs itself. No nanites.',
-    autopilot: false, autoPower: false, autoReactor: false, autoRadiators: false, autoFire: false, autoPDC: true,
+    name: 'Veteran', desc: 'Manual flight: rotation-damping SAS only, so you fly every flip and every aim by hand. Manual reactor and power. Point defence still runs itself.',
+    autopilot: false, sas: 'hold', autoPower: false, autoReactor: false, autoRadiators: false, autoFire: false, autoPDC: true,
     nanites: 0, naniteBreach: false, wear: 1.0, threat: 1.0, pods: 3, dmg: 1.0,
   },
   newtonian: {
-    name: 'Newtonian', desc: 'Everything manual, faster wear, harder threats, one backup crew pod. Good luck.',
-    autopilot: false, autoPower: false, autoReactor: false, autoRadiators: false, autoFire: false, autoPDC: false,
+    name: 'Newtonian', desc: 'No SAS at all: every rotation you start, you must stop. Everything manual, faster wear, harder threats, one backup pod.',
+    autopilot: false, sas: 'none', autoPower: false, autoReactor: false, autoRadiators: false, autoFire: false, autoPDC: false,
     nanites: 0, naniteBreach: false, wear: 1.3, threat: 1.3, pods: 1, dmg: 1.2,
   },
 };

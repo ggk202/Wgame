@@ -7,7 +7,8 @@ export const PAL = {
   white: 0xeceae3, off: 0xd9d5c9, beige: 0xcfc4a8, grey: 0x9aa1a9, steel: 0x6d747d, dark: 0x30353c, black: 0x15181c,
   blue: 0x2e5b96, rail: 0xd2a948, gold: 0xc9962c, red: 0xc23a2a, orange: 0xe07a2a,
 };
-export const mat = (color, o = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...o });
+export const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.72, metalness: 0.08, ...o });
+export const metal = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.75, ...o });
 export const emis = (color, k = 1) => new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k) });
 
 // ---------------- procedural textures (cached) ----------------
@@ -117,28 +118,8 @@ export const decalTex = () => canvasTex('decal', 1024, 256, (g, w, h) => {
   g.fillStyle = '#2e5b96'; g.fillRect(270, 140, 720, 14);
   g.fillStyle = '#1a1d22'; g.font = 'bold 48px Helvetica, Arial, sans-serif'; g.fillText('MTV-W1  ·  D–³He TORCH FREIGHTER', 270, 205);
 }, [1, 1], false);
-export function planetTex(kind) {
-  return canvasTex('planet-' + kind, 512, 256, (g, w, h) => {
-    const P = {
-      luna: { base: '#9a9a96', spots: ['#7c7c78', '#b4b4ae', '#6a6a66'], craters: 160 },
-      phobos: { base: '#b0603a', spots: ['#8a4428', '#c8784a', '#6e3a24', '#d89060'], craters: 30, cap: true },
-      ceres: { base: '#7e776c', spots: ['#5f5a52', '#958d80', '#e8e4da'], craters: 120 },
-      ganymede: { base: '#c9a77a', bands: ['#b0805a', '#e8d2b0', '#9a6a48', '#d8b88e', '#f0e0c8', '#a87850'], spot: true },
-    }[kind] || { base: '#888', spots: ['#777'], craters: 60 };
-    g.fillStyle = P.base; g.fillRect(0, 0, w, h);
-    if (P.bands) {
-      let y = 0; while (y < h) { const bh = rnd(6, 22); g.fillStyle = P.bands[Math.floor(rnd(0, P.bands.length))]; g.globalAlpha = 0.85; g.fillRect(0, y, w, bh); y += bh; }
-      g.globalAlpha = 0.25; for (let i = 0; i < 400; i++) { g.fillStyle = P.bands[i % P.bands.length]; g.beginPath(); g.ellipse(rnd(0, w), rnd(0, h), rnd(10, 40), rnd(1, 3), 0, 0, 7); g.fill(); }
-      g.globalAlpha = 1; g.fillStyle = '#c0583a'; g.beginPath(); g.ellipse(w * 0.62, h * 0.62, 26, 12, 0, 0, 7); g.fill();
-      return;
-    }
-    for (let i = 0; i < 260; i++) { g.fillStyle = P.spots[i % P.spots.length]; g.globalAlpha = rnd(0.15, 0.45); g.beginPath(); g.ellipse(rnd(0, w), rnd(0, h), rnd(8, 60), rnd(6, 30), rnd(0, 3), 0, 7); g.fill(); }
-    g.globalAlpha = 1;
-    for (let i = 0; i < P.craters; i++) { const x = rnd(0, w), y = rnd(20, h - 20), r = rnd(1.5, 9); g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke(); g.fillStyle = 'rgba(255,255,255,0.12)'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.6, 0, 7); g.fill(); }
-    if (P.cap) { g.fillStyle = '#f0ece6'; g.fillRect(0, 0, w, 14); g.fillRect(0, h - 10, w, 10); }
-  }, [1, 1], false);
-}
-export const texMat = (map, o = {}) => new THREE.MeshLambertMaterial({ map, ...o });
+export const texMat = (map, o = {}) => new THREE.MeshStandardMaterial({ map, roughness: 0.82, metalness: 0.04, ...o });
+export const goldMat = (r) => new THREE.MeshStandardMaterial({ map: goldTex(r), roughness: 0.32, metalness: 0.85 });
 
 // ---------------- labels ----------------
 export function textSprite(text, { size = 28, color = '#e8eef5', bg = 'rgba(10,16,24,0.78)', width = 1.8, pad = 10 } = {}) {
@@ -212,6 +193,47 @@ export function buildComp(kind, accent) {
       add(new THREE.BoxGeometry(0.62, 0.8, 0.12), blue, 0, 0.92, 1.45, -0.18);
       add(new THREE.CylinderGeometry(0.05, 0.07, 0.45, 6), grey, 0, 0.22, 1.15);
       for (const x of [-0.18, 0.18]) add(new THREE.BoxGeometry(0.05, 0.75, 0.02), rail, x, 0.95, 1.38, -0.18);
+      break;
+    }
+    case 'helm': {
+      const deskW = 2.6;
+      add(new THREE.BoxGeometry(deskW, 0.85, 0.75), rack, 0, 0.43, -0.15);
+      add(new THREE.BoxGeometry(deskW + 0.1, 0.07, 1.0), grey, 0, 0.88, 0.02);
+      for (const sgn of [-1, 1]) { // angled wing desks
+        const w = add(new THREE.BoxGeometry(1.0, 0.85, 0.7), rack, sgn * 1.65, 0.43, 0.25, 0, -sgn * 0.6);
+        add(new THREE.BoxGeometry(1.05, 0.07, 0.85), grey, sgn * 1.66, 0.88, 0.32, 0, -sgn * 0.6);
+      }
+      // main screen (interactive) and two side screens
+      add(new THREE.BoxGeometry(1.62, 1.04, 0.06), black, 0, 1.55, -0.38, -0.12);
+      screen = screenMesh(add, 1.5, 0.95, 0, 1.55, -0.345, -0.12);
+      const extras = [];
+      for (const sgn of [-1, 1]) {
+        add(new THREE.BoxGeometry(0.92, 0.62, 0.05), black, sgn * 1.58, 1.36, -0.02, -0.15, -sgn * 0.6);
+        extras.push(screenMesh(add, 0.84, 0.54, sgn * 1.565, 1.36, 0.005, -0.15, -sgn * 0.6));
+      }
+      g.userData.extras = extras;
+      // switch panel strip with lit toggles
+      for (let i = 0; i < 12; i++) add(new THREE.BoxGeometry(0.05, 0.03, 0.08), i % 4 === 0 ? mat(PAL.orange) : dark, -0.62 + i * 0.11, 0.935, 0.28);
+      add(new THREE.BoxGeometry(1.4, 0.02, 0.18), black, 0, 0.925, 0.3);
+      // pilot couch
+      add(new THREE.BoxGeometry(0.72, 0.14, 0.7), blue, 0, 0.52, 1.25);
+      add(new THREE.BoxGeometry(0.72, 0.62, 0.14), blue, 0, 0.86, 1.56, -0.3);
+      add(new THREE.BoxGeometry(0.46, 0.2, 0.12), blue, 0, 1.24, 1.67, -0.3);
+      add(new THREE.CylinderGeometry(0.07, 0.1, 0.45, 8), grey, 0, 0.22, 1.25);
+      for (const x of [-0.2, 0.2]) add(new THREE.BoxGeometry(0.05, 0.56, 0.02), rail, x, 0.88, 1.48, -0.3);
+      // armrests with hand controllers: RHC (rotation, right) and THC (translation, left)
+      const sticks = {};
+      for (const [sgn, key] of [[1, 'rhc'], [-1, 'thc']]) {
+        add(new THREE.BoxGeometry(0.14, 0.1, 0.6), grey, sgn * 0.45, 0.78, 1.18);
+        add(new THREE.BoxGeometry(0.16, 0.06, 0.16), black, sgn * 0.45, 0.85, 0.98);
+        const piv = new THREE.Group(); piv.position.set(sgn * 0.45, 0.88, 0.98); g.add(piv);
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, 0.16, 8), dark); shaft.position.y = 0.08; piv.add(shaft);
+        const grip = new THREE.Mesh(key === 'rhc' ? new THREE.CapsuleGeometry(0.045, 0.1, 3, 8) : new THREE.BoxGeometry(0.08, 0.12, 0.1), mat(key === 'rhc' ? 0x22262c : 0x3a3f46)); grip.position.y = 0.2; piv.add(grip);
+        const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.02, 8), mat(PAL.red)); btn.position.set(0, 0.29, 0.02); piv.add(btn);
+        sticks[key] = piv;
+      }
+      g.userData.sticks = sticks;
+      add(new THREE.BoxGeometry(deskW + 0.2, 0.06, 0.06), acc, 0, 0.9, 0.52);
       break;
     }
     case 'board':
@@ -305,7 +327,7 @@ export function buildComp(kind, accent) {
       break;
     case 'fab':
       add(new THREE.BoxGeometry(2.2, 2.0, 1.5), rack, 0, 1.0, -0.2);
-      add(new THREE.PlaneGeometry(1.3, 0.85), new THREE.MeshLambertMaterial({ color: 0x334455, transparent: true, opacity: 0.6 }), 0, 1.2, 0.56);
+      add(new THREE.PlaneGeometry(1.3, 0.85), new THREE.MeshStandardMaterial({ color: 0x334455, transparent: true, opacity: 0.6, roughness: 0.1, metalness: 0.3 }), 0, 1.2, 0.56);
       glow = add(new THREE.BoxGeometry(0.3, 0.3, 0.3), emis(0xffa040, 1), 0, 1.0, 0.1);
       add(new THREE.BoxGeometry(0.5, 0.3, 0.05), black, 0.8, 1.75, 0.56);
       screen = screenMesh(add, 0.46, 0.27, 0.8, 1.75, 0.59);
@@ -361,7 +383,7 @@ export function buildComp(kind, accent) {
       add(new THREE.BoxGeometry(0.55, 0.32, 0.05), black, 0, 0.8, 1.81);
       screen = screenMesh(add, 0.5, 0.28, 0, 0.8, 1.84);
       wing = new THREE.Group(); wing.position.set(-0.5, 1.2, 0); g.add(wing);
-      const wm = new THREE.MeshLambertMaterial({ map: radiatorTex([1, 3]), emissive: 0x000000 });
+      const wm = new THREE.MeshStandardMaterial({ map: radiatorTex([1, 3]), emissive: 0x000000, roughness: 0.55, metalness: 0.15 });
       const beam = new THREE.Mesh(new THREE.BoxGeometry(22, 0.3, 0.3), grey); beam.position.x = -11; wing.add(beam);
       for (let i = 0; i < 3; i++) {
         const p = new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.08, 13), wm); p.position.set(-1.2 - 3.5 - i * 7.0, 0, 0); p.rotation.x = 0.06 * (i - 1); wing.add(p);
@@ -396,17 +418,17 @@ export function buildComp(kind, accent) {
     case 'antenna': {
       add(new THREE.CylinderGeometry(0.12, 0.2, 3.2, 10), grey, 0, 1.6, 0);
       spin = new THREE.Group(); spin.position.y = 3.3; g.add(spin);
-      const dish = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 8, 0, Math.PI * 2, 0, 0.9), new THREE.MeshLambertMaterial({ color: PAL.white, side: THREE.DoubleSide }));
+      const dish = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 8, 0, Math.PI * 2, 0, 0.9), new THREE.MeshStandardMaterial({ color: PAL.white, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.2 }));
       dish.rotation.x = Math.PI * 0.75; spin.add(dish);
       const feed = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.4, 6), dark); feed.rotation.x = -Math.PI / 4; feed.position.set(0, 0.4, 0.4); spin.add(feed);
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), texMat(goldTex())); box.position.y = -0.2; spin.add(box);
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), goldMat()); box.position.y = -0.2; spin.add(box);
       add(new THREE.BoxGeometry(0.45, 0.28, 0.04), black, 0, 0.8, 0.22);
       screen = screenMesh(add, 0.4, 0.24, 0, 0.8, 0.25);
       break;
     }
     case 'sensorarray': {
       add(new THREE.CylinderGeometry(0.16, 0.24, 3.6, 10), grey, 0, 1.8, 0);
-      add(new THREE.BoxGeometry(1.4, 0.8, 0.8), texMat(goldTex()), 0, 2.2, 0);
+      add(new THREE.BoxGeometry(1.4, 0.8, 0.8), goldMat(), 0, 2.2, 0);
       add(new THREE.SphereGeometry(0.42, 12, 10), white, 0.9, 2.9, 0);
       add(new THREE.CylinderGeometry(0.22, 0.22, 0.6, 10), black, -0.85, 2.6, 0.1, Math.PI / 2);
       spin = new THREE.Group(); spin.position.y = 3.8; g.add(spin);
@@ -472,8 +494,8 @@ export function buildAvatar(color) {
   const dcm = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.14), mat(0x9aa1a9)); dcm.position.set(0, 1.0, 0.3); suit.add(dcm);
   for (const [x, c] of [[-0.1, PAL.red], [0, PAL.blue], [0.1, 0xffffff]]) { const k = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.04, 8), mat(c)); k.rotation.x = Math.PI / 2; k.position.set(x, 1.0, 0.38); suit.add(k); }
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.09), mat(PAL.blue)); flag.position.set(-0.32, 1.46, 0.06); flag.rotation.y = -Math.PI / 2; suit.add(flag);
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 14), new THREE.MeshPhongMaterial({ color: 0xdfe6ee, transparent: true, opacity: 0.45, shininess: 90 })); helmet.position.y = 1.72; suit.add(helmet);
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.255, 18, 12, -Math.PI * 0.42, Math.PI * 0.84, 0.35, 1.25), new THREE.MeshPhongMaterial({ color: 0xd8a83a, emissive: 0x3a2808, specular: 0xffffff, shininess: 120 }));
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 14), new THREE.MeshStandardMaterial({ color: 0xdfe6ee, transparent: true, opacity: 0.35, roughness: 0.05, metalness: 0.1 })); helmet.position.y = 1.72; suit.add(helmet);
+  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.255, 18, 12, -Math.PI * 0.42, Math.PI * 0.84, 0.35, 1.25), new THREE.MeshStandardMaterial({ color: 0xe0b040, emissive: 0x1a1004, roughness: 0.08, metalness: 1.0 }));
   visor.position.y = 1.72; suit.add(visor);
   const evvaShell = new THREE.Mesh(new THREE.SphereGeometry(0.265, 16, 10, 0, Math.PI * 2, 0, 0.75), sw); evvaShell.position.y = 1.72; suit.add(evvaShell);
   for (const x of [-0.2, 0.2]) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.12), mat(PAL.grey)); l.position.set(x, 1.86, 0.1); suit.add(l); const e = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), emis(0xfff4d0)); e.position.set(x, 1.86, 0.165); suit.add(e); }
@@ -513,7 +535,7 @@ export function buildExterior(compsOut) {
   const L = EXT.zMax - EXT.zMin + 4, zc = (EXT.zMax + EXT.zMin) / 2;
   const white = mat(PAL.white), grey = mat(PAL.grey), dark = mat(PAL.dark), black = mat(PAL.black), rail = mat(PAL.rail), blue = mat(PAL.blue);
   const mliM = (rx, ry) => texMat(mliTex([rx, ry]));
-  const goldM = (rx, ry) => texMat(goldTex([rx, ry]));
+  const goldM = (rx, ry) => goldMat([rx, ry]);
 
   // catwalk with ISS-yellow handrails
   add(new THREE.BoxGeometry(EXT.w * 2 + 1.2, 0.25, L), texMat(grateTex([4, 20])), 0, -0.13, zc);
@@ -548,7 +570,7 @@ export function buildExterior(compsOut) {
   // bridge windows (cupola-style ring of panes)
   for (let i = 0; i < 7; i++) { const a = -0.9 + i * 0.3; const w = add(new THREE.BoxGeometry(1.6, 1.0, 0.1), emis(0xbfd6ff, 0.55), Math.sin(a) * 7.5, habY + Math.cos(a) * 7.5, habZ0 - 3.6, 0, 0, -a); w.rotation.x = 0.55; }
   // markings: mission patch + name, and a blue stripe band
-  const decal = new THREE.Mesh(new THREE.PlaneGeometry(16, 4), new THREE.MeshLambertMaterial({ map: decalTex(), transparent: true }));
+  const decal = new THREE.Mesh(new THREE.PlaneGeometry(16, 4), new THREE.MeshStandardMaterial({ map: decalTex(), transparent: true, roughness: 0.8 }));
   decal.position.set(habR + 0.06, habY + 2, -58); decal.rotation.y = Math.PI / 2; g.add(decal);
   const decal2 = decal.clone(); decal2.position.x = -habR - 0.06; decal2.rotation.y = -Math.PI / 2; g.add(decal2);
   add(new THREE.CylinderGeometry(habR + 0.03, habR + 0.03, 1.2, 40, 1, true), blue, 0, habY, -47, Math.PI / 2);
@@ -580,7 +602,7 @@ export function buildExterior(compsOut) {
   add(new THREE.CylinderGeometry(9.5, 5, 1.6, 36), dark, 0, -6, 41, Math.PI / 2);
   add(new THREE.CylinderGeometry(5, 5, 9, 28), mliM(4, 2), 0, -6, 46.5, Math.PI / 2);
   for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; add(new THREE.BoxGeometry(0.4, 0.4, 9), grey, Math.cos(a) * 5.1, -6 + Math.sin(a) * 5.1, 46.5); }
-  add(new THREE.CylinderGeometry(3, 9.5, 14, 32, 1, true), new THREE.MeshLambertMaterial({ color: 0x3c3f45, side: THREE.DoubleSide }), 0, -6, 58, -Math.PI / 2);
+  add(new THREE.CylinderGeometry(3, 9.5, 14, 32, 1, true), new THREE.MeshStandardMaterial({ color: 0x3c3f45, side: THREE.DoubleSide, roughness: 0.45, metalness: 0.7 }), 0, -6, 58, -Math.PI / 2);
   add(new THREE.TorusGeometry(9.5, 0.3, 6, 36), grey, 0, -6, 65);
   const plume = new THREE.Mesh(new THREE.ConeGeometry(9, 140, 28, 1, true), new THREE.MeshBasicMaterial({ color: 0xc8b0ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
   plume.rotation.x = -Math.PI / 2; plume.position.set(0, -6, 135); plume.visible = false; g.add(plume);
@@ -612,11 +634,3 @@ export function buildExterior(compsOut) {
   return g;
 }
 
-// Planet / moon backdrop near waypoints
-export function buildPlanet(kind) {
-  const tex = planetTex(kind);
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.MeshLambertMaterial({ map: tex, emissive: 0x6a6a6a, emissiveMap: tex }));
-  const atm = new THREE.Mesh(new THREE.SphereGeometry(1.03, 48, 24), new THREE.MeshBasicMaterial({ color: kind === 'ganymede' ? 0xffe8c8 : kind === 'phobos' ? 0xffb090 : 0xffffff, transparent: true, opacity: kind === 'phobos' ? 0.12 : 0.04, side: THREE.BackSide }));
-  m.add(atm);
-  return m;
-}

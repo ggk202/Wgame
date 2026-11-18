@@ -2,6 +2,7 @@
 import { COMPS, COMP_IDS, DECKS, ROOM_R } from './config.js';
 import { clamp, rand, randi, chance, pick, weightedPick, polar, compPos, log, fx, startVote } from './util.js';
 import { eff, igniteComp, compsOnDeck, PDCS } from './sim.js';
+import { randDir, vnorm, cross, nose, angDeg, kick, qmul, qnorm, qconj, qrot, vlen, dot } from './attitude.js';
 
 export const ENEMY_TYPES = {
   corvette: { name: 'Pirate corvette', hp: 80, missiles: 6, rail: true, railCd: [30, 45], slugs: 8, pdc: 2, evade: 0.18, pref: 700, accel: 0.02, loot: 1, hail: true },
@@ -12,6 +13,13 @@ export const ENEMY_TYPES = {
 const NAMES = ['Kestrel', 'Black Tern', 'Mercy of Vesta', 'Lucky Strike', 'Rustbucket', 'Hachiman', 'Iron Lotus', 'Gallowglass', 'Ninth Wave', 'Saltpeter'];
 
 let _pid = 0;
+export const RAIL_CONE = 1.5; // degrees: the spinal railgun fires along the nose
+function fromTo(a, b) { // quaternion rotating unit vector a onto b
+  const c = cross(a, b), d = dot(a, b);
+  if (d < -0.9999) return [0, 1, 0, 0];
+  return qnorm([c[0], c[1], c[2], 1 + d]);
+}
+function nlerp(a, b, k) { const s = dot(a, b) + a[3] * b[3] < 0 ? -1 : 1; return qnorm([a[0] + (b[0] * s - a[0]) * k, a[1] + (b[1] * s - a[1]) * k, a[2] + (b[2] * s - a[2]) * k, a[3] + (b[3] * s - a[3]) * k]); }
 export function startEncounter(S, kind, pts) {
   pts = Math.max(40, pts);
   const enemies = [];
@@ -22,7 +30,8 @@ export function startEncounter(S, kind, pts) {
     enemies.push({
       id: 'e' + (++_pid) + Math.random().toString(36).slice(2, 5), type, name: type === 'drone' ? `Drone ${String.fromCharCode(65 + enemies.length)}` : `${T.name} “${pick(NAMES)}”`,
       hp, maxHp: hp, range: rand(2600, 3600), vr: type === 'drone' ? -10 : -8, missiles: Math.round(T.missiles * scale),
-      missileCd: rand(8, 20), railT: rand(10, 25), slugs: T.slugs || 0, dead: false, gone: false, fleeing: false, ...extra,
+      missileCd: rand(8, 20), railT: rand(10, 25), slugs: T.slugs || 0, dead: false, gone: false, fleeing: false,
+      dir: randDir(0.8), drift: vnorm([rand(-1, 1), rand(-1, 1), rand(-1, 1)]), dRate: rand(0.002, 0.008), q: [0, 0, 0, 1], spin: 0, ...extra,
     });
   };
   let name;
@@ -54,6 +63,7 @@ export function endEncounter(S, why) {
   S.enc = null;
   S.sensors.lock = null; S.sensors.q = 0; S.weap.charging = false;
   S.drive.evasive = false; S.drive.maneuver = 'hold';
+  if (S.att.mode === 'target') S.att.mode = 'hold';
   log(S, `Engagement over: ${why}`, 'good');
   S.story.tension = Math.min(1, S.story.tension + 0.3);
   if (E.loot > 0) {
@@ -67,6 +77,7 @@ export function applyHit(S, dmg, o = {}) {
   const { extBias = 0.35, deck = null, breachP = 0.55, fireP = 0.35, label = 'Impact' } = o;
   dmg *= S.settings.dmg;
   S.stats.hits++;
+  kick(S, 0.003 + dmg * 0.0005);
   if (deck === null && chance(extBias)) {
     const ext = COMP_IDS.filter((id) => COMPS[id].ext);
     const id = weightedPick(ext, (id) => (id === 'radA' || id === 'radB' ? (S.heat.radExt ? 3 : 0.6) : id === 'antenna' ? 0.8 : 1));
@@ -161,6 +172,18 @@ export function updateCombat(S, dt) {
     else e.vr += desire * T.accel * dt;
     e.vr = clamp(e.vr + manAcc * dt, T.kamikaze ? -25 : -12, e.fleeing ? 30 : 12);
     e.range = Math.max(0.5, e.range + e.vr * dt);
+    // bearing drifts as the contact maneuvers around us
+    if (chance(dt * 0.15)) e.drift = vnorm([e.drift[0] + rand(-0.5, 0.5), e.drift[1] + rand(-0.5, 0.5), e.drift[2] + rand(-0.5, 0.5)]);
+    const dd = cross(e.drift, e.dir);
+    e.dir = vnorm([e.dir[0] + dd[0] * e.dRate * dt, e.dir[1] + dd[1] * e.dRate * dt, e.dir[2] + dd[2] * e.dRate * dt]);
+    // visible attitude: nose on us when attacking, tail (and drive plume) toward us when fleeing
+    const face = e.fleeing ? e.dir : [-e.dir[0], -e.dir[1], -e.dir[2]];
+    const tq = fromTo([0, 0, -1], face);
+    const prev = e.q;
+    e.q = nlerp(e.q, qmul(tq, [0, 0, Math.sin(e.spin / 2), Math.cos(e.spin / 2)]), Math.min(1, dt * 0.35));
+    e.spin += dt * (T.kamikaze ? 0.8 : 0.03);
+    e.rcs = Math.abs(dot(prev, e.q)) < 0.99999;
+    e.thr = Math.abs(e.vr) > 0.5 && (desire !== 0 || T.kamikaze);
     if (e.fleeing) e.fleeT = (e.fleeT || 0) + dt;
     if (e.range > 6000 || (e.fleeing && (e.fleeT > 50 || e.range > 2500))) { e.gone = true; log(S, `${e.name} has broken contact`, 'info'); continue; }
     if (T.kamikaze) {
@@ -174,7 +197,8 @@ export function updateCombat(S, dt) {
     e.missileCd -= dt;
     if (e.missiles > 0 && e.missileCd <= 0 && e.range < 4000 && !e.fleeing) {
       const n = Math.min(e.missiles, 1 + randi(0, E.pts > 150 ? 2 : 1));
-      for (let i = 0; i < n; i++) E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'them', src: e.id, range: e.range, speed: 10, dmg: 30 });
+      for (let i = 0; i < n; i++) E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'them', src: e.id, range: e.range, speed: 10, dmg: 30, off: [rand(-1, 1), rand(-1, 1)] });
+      fx(S, 'efire', { id: e.id, w: 'missile' });
       e.missiles -= n; e.missileCd = rand(20, 32);
       log(S, `${e.name} launched ${n} torpedo${n > 1 ? 'es' : ''}!`, 'bad');
       fx(S, 'alarm', { kind: 'missile' });
@@ -183,7 +207,8 @@ export function updateCombat(S, dt) {
       e.railT -= dt;
       if (e.railT <= 0 && e.range < 3500 && !e.fleeing && e.slugs > 0) {
         e.slugs--;
-        E.proj.push({ id: 'p' + (++_pid), type: 'slug', from: 'them', src: e.id, range: e.range, r0: e.range, speed: 60, dmg: 26 });
+        E.proj.push({ id: 'p' + (++_pid), type: 'slug', from: 'them', src: e.id, range: e.range, r0: e.range, speed: 60, dmg: 26, off: [rand(-0.3, 0.3), rand(-0.3, 0.3)] });
+        fx(S, 'efire', { id: e.id, w: 'rail' });
         e.railT = rand(T.railCd[0], T.railCd[1]);
         log(S, `Railgun flash from ${e.name} — slug inbound`, 'warn');
       }
@@ -206,7 +231,11 @@ export function updateCombat(S, dt) {
     if (pr.range <= 0) {
       pr.done = true;
       if (pr.from === 'them') {
-        let p = pr.type === 'missile' ? 0.9 * (pr.chaffed ? 0.45 : 1) : 0.5 * (S.drive.evasive && canBurn ? 0.45 : 1) * Math.max(0.35, 1 - pr.r0 / 4000);
+        const src = E.enemies.find((x) => x.id === pr.src);
+        // nose-on we present a far smaller cross-section; tumbling/jinking spoils their firing solution
+        const aspect = src ? Math.abs(Math.sin((angDeg(nose(S.att.q), src.dir) * Math.PI) / 180)) : 1;
+        const size = 0.55 + 0.45 * aspect, spin = vlen(S.att.w) > 0.025 ? 0.75 : 1;
+        let p = pr.type === 'missile' ? 0.9 * (pr.chaffed ? 0.45 : 1) : 0.5 * size * spin * (S.drive.evasive && canBurn ? 0.45 : 1) * Math.max(0.35, 1 - pr.r0 / 4000);
         if (chance(p)) applyHit(S, pr.dmg, { label: pr.type === 'missile' ? 'Torpedo hit' : 'Railgun hit' });
         else log(S, pr.type === 'missile' ? 'Torpedo missed — decoyed' : 'Enemy slug went wide', 'good');
       } else {
@@ -214,9 +243,10 @@ export function updateCombat(S, dt) {
         if (!tgt || tgt.dead || tgt.gone) continue;
         if (chance(pr.p)) {
           tgt.hp -= pr.dmg;
+          fx(S, 'ehit', { id: tgt.id, w: pr.type });
           log(S, `${pr.type === 'missile' ? 'Torpedo' : 'Railgun slug'} hit ${tgt.name}! (${Math.max(0, Math.round((tgt.hp / tgt.maxHp) * 100))}% integrity)`, 'good');
           fx(S, 'boom', { far: true });
-          if (tgt.hp <= 0) { tgt.dead = true; S.stats.kills++; E.loot += ENEMY_TYPES[tgt.type].loot; log(S, `${tgt.name} destroyed!`, 'good'); }
+          if (tgt.hp <= 0) { fx(S, 'edead', { id: tgt.id }); tgt.dead = true; S.stats.kills++; E.loot += ENEMY_TYPES[tgt.type].loot; log(S, `${tgt.name} destroyed!`, 'good'); }
         } else log(S, `${pr.type === 'missile' ? 'Torpedo' : 'Slug'} missed ${tgt.name}`, 'warn');
       }
     }
@@ -240,9 +270,12 @@ export function fireRail(S) {
   if (W.rail < 1) return 'Railgun not charged';
   if (S.stores.slugs <= 0) return 'No slugs';
   if (eff(S, 'railgun') <= 0) return 'Railgun offline';
+  const aim = angDeg(nose(S.att.q), tgt.dir);
+  if (aim > RAIL_CONE) return `Spinal railgun not aligned (${aim.toFixed(1)}° off). The helm must point the nose at the target.`;
   const T = ENEMY_TYPES[tgt.type];
-  const p = 0.92 * Sn.q * Math.max(0.25, 1 - tgt.range / 5000) * (1 - T.evade);
-  E.proj.push({ id: 'p' + (++_pid), type: 'slug', from: 'us', target: tgt.id, range: tgt.range, speed: 60, dmg: 32, p });
+  const p = 0.92 * Sn.q * Math.max(0.25, 1 - tgt.range / 5000) * (1 - T.evade) * (1 - 0.45 * (aim / RAIL_CONE));
+  E.proj.push({ id: 'p' + (++_pid), type: 'slug', from: 'us', target: tgt.id, range: tgt.range, speed: 60, dmg: 32, p, off: [0, 0] });
+  kick(S, 0.004); // recoil
   W.rail = 0; S.stores.slugs--; S.heat.stored += 450;
   log(S, `Railgun fired at ${tgt.name} (est. hit ${Math.round(p * 100)}%)`, 'info');
   fx(S, 'rail');
@@ -258,7 +291,7 @@ export function launchTorpedo(S) {
   if (!tube) return 'No tube loaded — load at the Munitions Magazine';
   tube.loaded = false;
   const p = 0.9 * (1 - ENEMY_TYPES[tgt.type].evade * 0.5);
-  E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'us', target: tgt.id, range: tgt.range, speed: 10, dmg: 38, p });
+  E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'us', target: tgt.id, range: tgt.range, speed: 10, dmg: 38, p, off: [rand(-1, 1), rand(-1, 1)] });
   log(S, `Torpedo away — target ${tgt.name}`, 'info');
   fx(S, 'launch');
   return null;

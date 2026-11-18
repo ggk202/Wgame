@@ -2,12 +2,14 @@
 import { COMPS, COMP_IDS, DECKS, WAYPOINTS, SHIP, G0, RECIPES, STATION_PRICES, ITEMS, AU, EXT, deckName } from './config.js';
 import { fmtDist, fmtTime, fmtGameTime, clamp, pct } from './util.js';
 import { eff, maxG, deltaV, heatFrac, demandOf, PDCS } from './sim.js';
+import { qrot, qconj, nose, angDeg, sasModes, rollErr } from './attitude.js';
+import { RAIL_CONE } from './combat.js';
 import { ENEMY_TYPES } from './combat.js';
 import { EVENTS } from './events.js';
 import { bar, btn, cls, esc } from './ui.js';
 
 const kmps = (v) => (v / 1000).toFixed(1) + ' km/s';
-const stateName = { transit: 'IN TRANSIT', orbit: 'IN ORBIT', docking: 'DOCKING', docked: 'DOCKED' };
+const stateName = { transit: 'IN TRANSIT', orbit: 'IN ORBIT', approach: 'DOCKING APPROACH', docking: 'LATCHING', docked: 'DOCKED' };
 const destName = (S) => WAYPOINTS[Math.min(S.nav.leg + 1, WAYPOINTS.length - 1)].name;
 
 function flightBlock(B) {
@@ -16,9 +18,10 @@ function flightBlock(B) {
   B.kv('Velocity (toward target)', (S) => kmps(S.nav.v));
   B.kv('Drive', (S) => {
     const D = S.drive;
-    if (D.flip > 0) return { text: `FLIPPING (${Math.ceil(D.flip)} s)`, cls: 'warn' };
-    if (!D.ignited) return { text: `COLD · ${D.orient > 0 ? 'PROGRADE' : 'RETROGRADE'}`, cls: '' };
-    return { text: `${D.orient > 0 ? 'PROGRADE' : 'RETROGRADE'} · ${(D.acc / G0).toFixed(2)} g · throttle ${pct(D.throttle)}${D.locked > 0 ? ' · VALVE STUCK' : ''}`, cls: D.locked > 0 ? 'bad' : 'good' };
+    const ori = D.orient > 0 ? 'PROGRADE' : D.orient < 0 ? 'RETROGRADE' : `OFF-AXIS (${Math.round((Math.acos(Math.max(-1, Math.min(1, Math.abs(D.along || 1)))) * 180) / Math.PI)}°)`;
+    if (D.flip > 0) return { text: `SLEWING · ${Math.round(D.flip)}° to go`, cls: 'warn' };
+    if (!D.ignited) return { text: `COLD · ${ori}`, cls: D.orient ? '' : 'warn' };
+    return { text: `${ori} · ${(D.acc / G0).toFixed(2)} g · throttle ${pct(D.throttle)}${D.locked > 0 ? ' · VALVE STUCK' : ''}`, cls: D.locked > 0 || !D.orient ? 'bad' : 'good' };
   });
   B.kv('Reaction mass / Δv left', (S) => ({ text: `${S.mass.rmass.toFixed(0)} t · ${(deltaV(S) / 1000).toFixed(0)} km/s`, cls: cls(S.mass.rmass, 500, 200) }));
 }
@@ -35,12 +38,23 @@ export const PANELS = {
   helm: {
     title: 'HELM',
     build(B) {
+      B.view('dock', (S) => S.nav.state === 'approach' || S.nav.state === 'docking');
+      B.pad('Translate (RCS)', [['FWD ⇡ I', 't', 2, 1], ['BACK ⇣ K', 't', 2, -1], ['◀ LEFT J', 't', 0, -1], ['RIGHT L ▶', 't', 0, 1], ['UP U', 't', 1, 1], ['DOWN O', 't', 1, -1]], (S) => S.nav.state === 'approach');
+      B.buttons([
+        { label: 'Request approach', act: 'helm.dock', show: (S) => S.nav.state === 'orbit', enabled: (S) => S.nav.state === 'orbit' },
+        { label: 'Back off & re-approach', act: 'helm.reapproach', show: (S) => S.nav.state === 'approach' },
+      ]);
+      B.section('Attitude');
+      B.canvas(560, 230, drawAttitude);
+      B.seg('SAS', [{ v: 'off', l: 'Off' }, { v: 'hold', l: 'Hold' }, { v: 'pro', l: 'Prograde' }, { v: 'retro', l: 'Retro' }, { v: 'target', l: 'Target' }, { v: 'dock', l: 'Dock align' }], (S) => S.att.mode, 'att.mode', (v) => ({ m: v }), (S, v) => sasModes(S).includes(v));
+      B.pad('Rotate (RCS)', [['▲ NOSE UP S', 'r', 0, 1], ['▼ NOSE DN W', 'r', 0, -1], ['◀ YAW A', 'r', 1, 1], ['YAW D ▶', 'r', 1, -1], ['⟲ ROLL Q', 'r', 2, 1], ['ROLL E ⟳', 'r', 2, -1]]);
+      B.note((S) => `Keys while seated: <b>W/S</b> pitch · <b>A/D</b> yaw · <b>Q/E</b> roll · <b>X</b> kill rotation${S.nav.state === 'approach' ? ' · <b>I/K</b> forward/back · <b>J/L</b> left/right · <b>U/O</b> up/down' : ''}. ${S.settings.sas === 'none' ? 'No SAS on this difficulty: every rotation you start, you must stop yourself.' : S.settings.sas === 'hold' ? 'SAS can only damp rotation (Hold). Pointing is up to you.' : ''}`);
       B.section('Flight');
       flightBlock(B);
       B.buttons([
         { label: 'Ignite drive', act: 'helm.ignite', enabled: (S) => !S.drive.ignited && S.nav.state === 'transit' },
         { label: 'Cut drive', act: 'helm.cutoff', cls: 'red', enabled: (S) => S.drive.ignited },
-        { label: 'Flip 180°', act: 'helm.flip', enabled: (S) => S.drive.flip <= 0 && S.nav.state === 'transit' },
+        { label: 'Flip 180° (SAS)', act: 'helm.flip', enabled: (S) => S.drive.flip <= 0 && S.nav.state === 'transit' && sasModes(S).includes('pro') },
       ]);
       B.slider('Thrust (g)', { min: 0, max: 2, step: 0.01, maxFn: (S) => maxG(S).toFixed(2), get: (S) => S.drive.cmdG, fmt: (v) => v.toFixed(2) + ' g', act: 'helm.g', args: (v) => ({ g: v }) });
       B.buttons([{ label: 'Autopilot', labelFn: (S) => (S.settings.autopilot ? `Autopilot: ${S.nav.autopilot ? 'ENGAGED' : 'OFF'}` : 'Autopilot: N/A at this difficulty'), act: 'helm.autopilot', args: () => ({ on: !B.ctx.S().nav.autopilot }), enabled: (S) => S.settings.autopilot }]);
@@ -55,12 +69,13 @@ export const PANELS = {
       B.section('Combat maneuvering');
       B.toggle('Evasive jinking', (S) => S.drive.evasive, 'helm.evasive', (v) => ({ on: v }));
       B.seg('Range', [{ v: 'hold', l: 'Hold' }, { v: 'open', l: 'Open range' }, { v: 'close', l: 'Close' }], (S) => S.drive.maneuver, 'helm.maneuver', (v) => ({ m: v }));
-      B.note('Jinking halves enemy railgun accuracy but costs reaction mass and adds 1.2 g. Crew away from a couch take injuries above 2.2 g.');
+      B.note((S) => { const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone); const aim = t ? angDeg(nose(S.att.q), t.dir) : null; return (t ? `<b>${aim <= RAIL_CONE ? 'RAIL SOLUTION' : 'Target ' + aim.toFixed(1) + '° off the nose'}</b> · ` : '') + 'The spinal railgun only fires along the nose: point the ship at the target (SAS Target, or by hand). Nose-on you also present a much smaller silhouette. Rotating or jinking spoils enemy railgun solutions; jinking adds 1.2 g.'; });
       B.section('Port');
       B.buttons([
-        { label: 'Request docking', act: 'helm.dock', enabled: (S) => S.nav.state === 'orbit' },
+        { label: 'Request approach', act: 'helm.dock', enabled: (S) => S.nav.state === 'orbit' },
         { label: 'Undock & depart', act: 'helm.depart', cls: 'green', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1 },
       ]);
+      B.note('Docking is flown by hand: the approach starts about 200 m out. Null your sideways drift, line the cross up inside the target circle, match roll, and touch the port slower than 0.25 m/s.');
     },
   },
 
@@ -111,6 +126,7 @@ export const PANELS = {
   sensors: {
     title: 'SENSORS',
     build(B) {
+      telescopeBlock(B);
       B.canvas(400, 200, (g, S, w, h) => {
         g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
         const cx = w / 2, cy = h - 10, maxR = 4500, sc = (h - 20) / maxR;
@@ -141,6 +157,7 @@ export const PANELS = {
   tactical: {
     title: 'FIRE CONTROL',
     build(B) {
+      telescopeBlock(B);
       B.kv('Target', (S) => { const e = S.enc && S.enc.enemies.find((x) => x.id === S.sensors.lock); return e ? { text: `${e.name} · ${e.range.toFixed(0)} km · lock ${pct(S.sensors.q)}`, cls: S.sensors.q > 0.4 ? 'good' : 'warn' } : { text: 'NO LOCK — select a contact below', cls: 'warn' }; });
       B.html((S) => contactList(S));
       B.section('Spinal railgun');
@@ -179,7 +196,7 @@ export const PANELS = {
           '<div class="grid2">' + Object.entries(STATION_PRICES).map(([k, v]) => `<button class="btn" data-act="station.buy" data-args='{"item":"${k}"}' ${S.credits < v.cost ? 'disabled' : ''}>${v.name} <i>${v.cost}cr</i></button>`).join('') + '</div>';
       });
       B.buttons([
-        { label: 'Request docking', act: 'helm.dock', enabled: (S) => S.nav.state === 'orbit', show: (S) => S.nav.state === 'orbit' },
+        { label: 'Request approach', act: 'helm.dock', enabled: (S) => S.nav.state === 'orbit', show: (S) => S.nav.state === 'orbit' },
         { label: 'Undock & depart', act: 'helm.depart', cls: 'green', enabled: (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1, show: (S) => S.nav.state === 'docked' },
       ]);
       B.section('Message log');
@@ -442,6 +459,58 @@ export const PANELS = {
   },
 };
 
+function telescopeBlock(B) {
+  B.view('telescope');
+  B.buttons([
+    { label: 'Zoom ×1', onClick: () => B.ctx.ext && (B.ctx.ext.zoom = 1) },
+    { label: 'Zoom ×4', onClick: () => B.ctx.ext && (B.ctx.ext.zoom = 4) },
+    { label: 'Wide ×0.2', onClick: () => B.ctx.ext && (B.ctx.ext.zoom = 0.2) },
+    { label: 'Next target', onClick: () => { const S = B.ctx.S(); if (!S.enc) return; const live = S.enc.enemies.filter((e) => !e.dead && !e.gone); if (!live.length) return; const i = live.findIndex((e) => e.id === S.sensors.lock); B.ctx.act('sensors.lock', { id: live[(i + 1) % live.length].id }); } },
+  ]);
+}
+// Attitude indicator: everything as seen from the nose (centre = where the nose points; edge = directly behind)
+function drawAttitude(g, S, w, h) {
+  const A = S.att, R = 100, cx = 120, cy = h / 2;
+  g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#3a1a04'; g.lineWidth = 1;
+  for (const r of [30, 60, 90, 180]) { g.beginPath(); g.arc(cx, cy, (r / 180) * R, 0, 7); g.stroke(); }
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  const qi = qconj(A.q);
+  const proj = (d) => { const b = qrot(qi, d); const ang = Math.acos(Math.max(-1, Math.min(1, -b[2]))); const phi = Math.atan2(b[1], b[0]); const r = (ang / Math.PI) * R; return [cx + Math.cos(phi) * r, cy - Math.sin(phi) * r, ang]; };
+  const mark = (d, col, shape, label) => {
+    const [x, y] = proj(d); g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2; g.beginPath();
+    if (shape === 'pro') { g.arc(x, y, 7, 0, 7); g.moveTo(x, y - 7); g.lineTo(x, y - 12); g.moveTo(x - 7, y); g.lineTo(x - 12, y); g.moveTo(x + 7, y); g.lineTo(x + 12, y); }
+    else if (shape === 'retro') { g.arc(x, y, 7, 0, 7); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); }
+    else if (shape === 'tgt') { g.moveTo(x, y - 8); g.lineTo(x + 8, y); g.lineTo(x, y + 8); g.lineTo(x - 8, y); g.closePath(); }
+    else { g.rect(x - 6, y - 6, 12, 12); }
+    g.stroke(); g.font = '10px monospace'; g.fillText(label, x + 10, y - 8);
+  };
+  mark([0, 0, -1], S.nav.state === 'approach' ? '#9dff7a' : '#ffc27a', S.nav.state === 'approach' ? 'port' : 'pro', S.nav.state === 'approach' ? 'PORT' : 'PRO');
+  mark([0, 0, 1], '#a8581a', 'retro', 'RETRO');
+  if (S.enc) for (const e of S.enc.enemies) if (!e.dead && !e.gone) mark(e.dir, e.id === S.sensors.lock ? '#ff3b2f' : '#ffd23f', 'tgt', e.id === S.sensors.lock ? 'TGT' : '');
+  const up = proj([0, 1, 0]); g.fillStyle = '#7a4a20'; g.font = '10px monospace'; g.fillText('UP', up[0] - 6, up[1] + 3);
+  // nose crosshair + railgun cone
+  g.strokeStyle = '#ff8a1e'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx - 16, cy); g.lineTo(cx - 5, cy); g.moveTo(cx + 5, cy); g.lineTo(cx + 16, cy); g.moveTo(cx, cy - 16); g.lineTo(cx, cy - 5); g.moveTo(cx, cy + 5); g.lineTo(cx, cy + 16); g.stroke();
+  g.beginPath(); g.arc(cx, cy, Math.max(2, (RAIL_CONE / 180) * R * 4), 0, 7); g.stroke();
+  // rates and status
+  const deg = (x) => (x * 180) / Math.PI;
+  const bars = [['PITCH', A.w[0]], ['YAW', A.w[1]], ['ROLL', A.w[2]]];
+  g.font = '12px monospace';
+  bars.forEach(([n, v], i) => {
+    const y = 28 + i * 34, x0 = 250, bw = 280;
+    g.fillStyle = '#a8581a'; g.fillText(`${n} ${deg(v) >= 0 ? '+' : ''}${deg(v).toFixed(2)}°/s`, x0, y);
+    g.fillStyle = '#2a1204'; g.fillRect(x0, y + 5, bw, 8);
+    g.fillStyle = Math.abs(v) < 0.002 ? '#9dff7a' : '#ff8a1e'; const k = Math.max(-1, Math.min(1, v / 0.16)); g.fillRect(x0 + bw / 2 + Math.min(0, k * bw / 2), y + 5, Math.abs(k * bw / 2), 8);
+    g.fillStyle = '#ffc27a'; g.fillRect(x0 + bw / 2 - 1, y + 3, 2, 12);
+  });
+  g.fillStyle = '#ffc27a';
+  const n = nose(A.q);
+  g.fillText(`SAS ${A.mode.toUpperCase()}${A.err > 0.5 ? `  ERR ${A.err.toFixed(1)}°` : ''}${A.rcs ? '  · RCS FIRING' : ''}`, 250, 136);
+  g.fillText(`NOSE vs PROGRADE ${angDeg(n, [0, 0, -1]).toFixed(1)}°   ROLL ${rollErr(A.q).toFixed(1)}°`, 250, 156);
+  const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone);
+  if (t) { const a = angDeg(n, t.dir); g.fillStyle = a <= RAIL_CONE ? '#ffd23f' : '#ff3b2f'; g.fillText(a <= RAIL_CONE ? `RAIL SOLUTION ON ${t.name.split(' “')[0].toUpperCase()}` : `TARGET ${a.toFixed(1)}° OFF NOSE`, 250, 176); }
+  if (S.nav.state === 'approach' && S.prox) { g.fillStyle = '#9dff7a'; g.fillText(`PORT ${Math.max(0, S.prox.p[2]).toFixed(1)} m · ${(-S.prox.v[2]).toFixed(2)} m/s`, 250, 196); }
+}
 function contactList(S) {
   const E = S.enc;
   if (!E) return '<div class="note">No contacts.</div>';
@@ -475,6 +544,13 @@ export function statusBlock(B) {
 const pc = (v) => Math.round(v * 100) + '%';
 const C = (v, w, b, hi) => cls(v, w, b, hi);
 export function screenInfo(S, id) {
+  if (id === 'helm#0') { const A = S.att, d = (x) => ((x * 180) / Math.PI).toFixed(2); return { title: 'ATTITUDE', lines: [['SAS', A.mode.toUpperCase()], ['NOSE/PRO', angDeg(nose(A.q), [0, 0, -1]).toFixed(1) + '°'], ['P/Y/R °/s', `${d(A.w[0])} ${d(A.w[1])} ${d(A.w[2])}`], ['RCS', A.rcs ? 'FIRING' : 'IDLE', A.rcs ? 'warn' : '']] }; }
+  if (id === 'helm#1') {
+    if (S.nav.state === 'approach' && S.prox) { const P = S.prox; return { title: 'DOCKING', lines: [['RANGE', Math.max(0, P.p[2]).toFixed(1) + ' m'], ['CLOSING', (-P.v[2]).toFixed(2) + ' m/s', -P.v[2] > 0.25 && P.p[2] < 10 ? 'bad' : ''], ['OFF-AXIS', Math.hypot(P.p[0], P.p[1]).toFixed(2) + ' m'], ['ROLL', rollErr(S.att.q).toFixed(1) + '°']] }; }
+    const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone);
+    if (t) { const a = angDeg(nose(S.att.q), t.dir); return { title: 'TARGETING', lines: [['TARGET', t.name.split(' “')[0].toUpperCase().slice(0, 16)], ['RANGE', t.range.toFixed(0) + ' km'], ['OFF NOSE', a.toFixed(1) + '°', a <= RAIL_CONE ? '' : 'warn'], ['RAIL', a <= RAIL_CONE ? 'SOLUTION' : 'NO SOLUTION', a <= RAIL_CONE ? '' : 'bad']] }; }
+    return { title: 'NAV', lines: [['STATE', stateName[S.nav.state]], ['VELOCITY', kmps(S.nav.v)], ['THRUST', `${S.drive.g.toFixed(2)} g`]] };
+  }
   const c = S.comps[id], N = S.nav, R = S.reactor, D = S.drive;
   const name = COMPS[id].name.toUpperCase();
   const integ = ['INTEGRITY', c.hp / 100, C(c.hp, 60, 25)];

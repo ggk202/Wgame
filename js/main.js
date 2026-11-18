@@ -11,6 +11,8 @@ import { HUD, PanelView, $, esc } from './ui.js';
 import { PANELS, screenInfo } from './panels.js';
 import { HostNet, ClientNet, makeCode } from './net.js';
 import { Sfx } from './audio.js';
+import { ExtView } from './extview.js';
+import { sasModes } from './attitude.js';
 
 const ART = !!window.WOLFRAM_ARTIFACT;
 const QS = (() => { try { return new URLSearchParams(location.search); } catch (e) { return new URLSearchParams(); } })();
@@ -21,12 +23,12 @@ const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { ret
 const G = {
   role: null, S: null, myId: null, net: null, code: '',
   ctl: new Controller(), world: null, hud: null, panel: null, panelKind: null, panelComp: null,
-  sfx: new Sfx(), touch: null, touchMode: false,
+  sfx: new Sfx(), touch: null, touchMode: false, ext: new ExtView(), pilotTouch: { r: [0, 0, 0], t: [0, 0, 0] }, pilotSent: '', pilotT: 0,
   simAcc: 0, sendT: 0, posT: 0, hudT: 0, panelT: 0, workT: 0, saveT: 0, lastTp: 0,
   focus: null, menuOpen: false, chatOpen: false, ended: false, lifting: false, statusHeld: false,
 };
 window.WOLFRAM = G; // for debugging from the console
-G.dbg = { input, openPanel: (...a) => openPanel(...a), closePanel: () => closePanel(), act: (...a) => act(...a), rideLift: (d) => rideLift(d) };
+G.dbg = { input, openPanel: (...a) => openPanel(...a), closePanel: () => closePanel(), act: (...a) => act(...a), rideLift: (d) => rideLift(d), eva: (o) => cycleAirlock(o) };
 
 // ---------------- lobby ----------------
 function initLobby() {
@@ -151,6 +153,7 @@ function enterGame() {
   if (!G.world) {
     G.world = new World($('#view'));
     G.world.screenInfo = screenInfo;
+    G.world.setQuality(prefs.quality || (G.touchMode || isTouchDevice() ? 'medium' : 'high'));
     G.world.onScreenBoot = (id, dist) => { const v = Math.max(0, 1 - dist / 14); if (v > 0.05) { G.sfx.crtOn(v * 0.5); G.sfx.relayBank(3, 0.8, v * 0.7); } };
     G.hud = new HUD($('#hud'));
     G.panel = new PanelView($('#panel'), panelCtx());
@@ -193,6 +196,9 @@ function panelCtx() {
     S: () => G.S, me: () => meView(), act, click: () => G.sfx.play('click'), get touch() { return G.touchMode; },
     local: (a, args) => { if (a === 'local.lift') rideLift(args.deck); if (a === 'local.eva') cycleAirlock(args.out); },
     sfx: G.sfx,
+    ext: G.ext,
+    attachView: (host, mode) => G.ext.attach(host, mode),
+    pilotPress: (grp, idx, v) => { G.pilotTouch[grp][idx] = v; },
     closePanel: () => closePanel(),
   };
 }
@@ -259,8 +265,13 @@ function cycleAirlock(out) {
     setTimeout(() => { $('#fade').classList.remove('on'); G.lifting = false; }, 400);
   }, 1500);
 }
+const PILOT_KEYS = 'wasdqeijkluox';
 function onKey(k, e) {
   if (G.chatOpen) return true;
+  if (G.panel.open && G.panelComp === 'helm' && PILOT_KEYS.includes(k) && k.length === 1) {
+    if (k === 'x') { if (sasModes(G.S).includes('hold')) act('att.mode', { m: 'hold' }); else G.hud.toast('No SAS on this difficulty: counter the rotation by hand', 'warn'); }
+    return true;
+  }
   if (k === 'escape') { if (G.panel.open) closePanel(); else toggleMenu(); return true; }
   if (k === 'tab') { if (!G.panel.open) { G.statusHeld = true; openPanel('status'); } return true; }
   if (k === 'h') { toggleHelp(); return true; }
@@ -335,8 +346,10 @@ function handleInteraction(dt) {
 function handleFx(list) {
   const me = meView();
   for (const f of list) {
+    G.ext.onFx(f);
     switch (f.type) {
       case 'log': logLocal(f.text, f.kind); if (f.kind === 'bad') G.sfx.play('warn'); break;
+      case 'dock': G.sfx.relayBank(6, 1.2, 1); G.sfx.play('hit'); if (G.world) G.world.shake = 0.5; break;
       case 'toast': if (f.to === G.myId) { G.hud.toast(f.text, 'warn'); G.sfx.play('warn'); } break;
       case 'hit': if (G.world) G.world.shake = me && me.deck === f.deck ? Math.min(1.6, 0.7 + f.power) : 0.35; G.sfx.play('hit'); break;
       case 'alarm': G.sfx.play(f.kind === 'storm' ? 'storm' : 'alarm'); break;
@@ -394,6 +407,17 @@ function frame(tms) {
   if (G.panel.open) G.panel.place(G.world.focusRect());
   document.body.classList.toggle('focused', !!G.world.focus);
   G.sfx.tick(dt, S.alert);
+  // hand controllers: keys + on-screen pads while seated at the helm
+  if (G.panel.open && G.panelComp === 'helm' && G.world.focus) {
+    const k = G.ctl.keys, P = G.pilotTouch, b = (x) => (k[x] ? 1 : 0), c = (x) => Math.max(-1, Math.min(1, x));
+    const r = [c(b('s') - b('w') + P.r[0]), c(b('a') - b('d') + P.r[1]), c(b('q') - b('e') + P.r[2])];
+    const t = [c(b('l') - b('j') + P.t[0]), c(b('u') - b('o') + P.t[1]), c(b('i') - b('k') + P.t[2])];
+    const sig = r.join() + '|' + t.join(), active = sig !== '0,0,0|0,0,0';
+    G.pilotT -= rdt;
+    if (sig !== G.pilotSent || (active && G.pilotT <= 0)) { act('att.cmd', { r, t }); G.pilotSent = sig; G.pilotT = 0.25; }
+    if (active && Math.random() < rdt * 6) G.sfx.noise(0.06, 0.05, 2600);
+  } else if (G.pilotSent && G.pilotSent !== '0,0,0|0,0,0') { act('att.cmd', { r: [0, 0, 0], t: [0, 0, 0] }); G.pilotSent = ''; }
+  if (G.panel.open) G.ext.render(S, rdt, now);
   G.sfx.setConsoleHum(!!G.world.focus && G.world.focusT > 0.5);
   { let near = 0; const me2 = meView(); if (me2) for (const id in G.world.comps) { const v = G.world.comps[id]; if (v.canvas && v.wasLive && v.group.parent && v.group.parent.visible) { const p = v.group.position; if (Math.hypot(p.x - me2.x, p.z - me2.z) < 7) near++; } } G.sfx.idle(rdt, !!G.world.focus, near); }
   G.hudT -= dt;
@@ -432,6 +456,8 @@ function setupMenus() {
   $('#btn-endlobby').onclick = () => location.reload();
   $('#help-close').onclick = () => toggleHelp(false);
   $('#btn-lock').onclick = () => { toggleMenu(false); lockMouse(); };
+  const ql = $('#opt-quality'); ql.value = prefs.quality || (G.touchMode ? 'medium' : 'high');
+  ql.onchange = () => { prefs.quality = ql.value; savePrefs(); G.world.setQuality(ql.value); };
   const sens = $('#opt-sens'), inv = $('#opt-invert');
   sens.value = prefs.sens; $('#sens-val').textContent = prefs.sens.toFixed(1) + '×'; inv.checked = !!prefs.invertY;
   sens.oninput = () => { prefs.sens = +sens.value; $('#sens-val').textContent = prefs.sens.toFixed(1) + '×'; savePrefs(); };
