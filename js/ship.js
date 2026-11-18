@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { COMPS, COMP_IDS, EXT, RING } from './config.js';
 import { SL } from './hull.js';
 import { PAL, mat, metal, emis, texMat, mliTex, goldMat, radiatorTex, grateTex, decalTex, screenTex, textSprite, struts } from './models.js';
-import { bakeStatic, hazardTex } from './interior.js';
+import { bakeStatic, hazardTex, RING_WINDOWS } from './interior.js';
 
 const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
 let SM = null;
@@ -258,7 +258,21 @@ export function buildShipExterior(compsOut) {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       ra(new THREE.BoxGeometry(0.3, 0.3, hw * 2 + 0.1), M.grey, Math.cos(a) * (r1 + 0.05), Math.sin(a) * (r1 + 0.05), 0, 0, 0, a);
-      if (i % 2 === 0) for (const s of [-1, 1]) { const w = ra(new THREE.PlaneGeometry(1.2, 0.7), M.winLit, Math.cos(a + 0.065) * (SL.ringR + 0.5), Math.sin(a + 0.065) * (SL.ringR + 0.5), s * (hw + 0.02), 0, s > 0 ? 0 : Math.PI, a + 0.065 + Math.PI / 2); w.userData.keep = true; }
+
+    }
+    // big viewports: 8 m windows in both side faces between the labs, and 5 m floor viewports in the outer rim (lit from inside)
+    const RF = RING.R, winMat = new THREE.MeshBasicMaterial({ color: 0xf0d9b0, side: THREE.DoubleSide }), frameM = M.dark;
+    for (const zc of RING_WINDOWS.side) {
+      const a0 = zc / RF, da = RING_WINDOWS.sideLen / RF, rIn = SL.ringR + (RF - SL.ringR) - RING_WINDOWS.y1, rOut = SL.ringR + (RF - SL.ringR) - RING_WINDOWS.y0;
+      for (const sd of [-1, 1]) {
+        const w = new THREE.Mesh(new THREE.RingGeometry(rIn, rOut, 16, 1, a0 - da / 2, da), winMat); w.position.z = sd * (hw + 0.03); w.userData.keep = true; ring.add(w);
+        const fr = new THREE.Mesh(new THREE.RingGeometry(rIn - 0.25, rOut + 0.25, 16, 1, a0 - da / 2 - 0.01, da + 0.02), frameM); fr.position.z = sd * (hw + 0.015); ring.add(fr);
+        for (let k = 1; k < 4; k++) { const ak = a0 - da / 2 + (k * da) / 4, rm = (rIn + rOut) / 2; ra(new THREE.BoxGeometry(0.16, rOut - rIn, 0.08), frameM, Math.cos(ak) * rm, Math.sin(ak) * rm, sd * (hw + 0.05), 0, 0, ak - Math.PI / 2); }
+      }
+    }
+    for (const zc of RING_WINDOWS.floor) {
+      const a0 = zc / RF, da = RING_WINDOWS.floorLen / RF;
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(r1 + 0.04, r1 + 0.04, RING_WINDOWS.floorHalfW * 2, 10, 1, true, Math.PI / 2 - a0 - da / 2, da), winMat); w.rotation.x = Math.PI / 2; w.userData.keep = true; ring.add(w);
     }
     ra(new THREE.TorusGeometry(r1 + 0.32, 0.12, 8, 144), M.dark, 0, 0, 1.6);
     ra(new THREE.TorusGeometry(r1 + 0.32, 0.12, 8, 144), M.copper, 0, 0, -1.6);

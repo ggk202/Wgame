@@ -384,7 +384,7 @@ export class World {
       if (pk) { this.planet = buildPlanet(pk); this.planet.scale.setScalar(pk === 'ganymede' ? 2600 : 1500); this.scene.add(this.planet); }
       if (pk === 'luna') { this.earth = buildPlanet('earth'); this.earth.scale.setScalar(260); this.scene.add(this.earth); }
     }
-    this.placeSky(cp, now);
+    this.placeSky(cp, now, ring && S.ring ? S.ring.spin : null);
     this.updateStation(S, now);
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.5);
     this.battleFlash.material.opacity = this.flash;
@@ -443,12 +443,16 @@ export class World {
     if (me.item && !this.focus) { this.hand.visible = true; this.hand.material.color.setHex(ITEMS[me.item.type].color); }
     else this.hand.visible = false;
   }
-  placeSky(cp, now) {
-    const sunDir = new THREE.Vector3(-2600, 900, 1500).normalize();
-    if (this.planet) { this.planet.position.set(cp.x - 2600, cp.y - 900, cp.z - 2200); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); }
-    if (this.earth) { this.earth.position.set(cp.x + 1500, cp.y + 600, cp.z - 3600); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); }
-    this.stars.position.copy(cp);
-    this.sun.position.set(cp.x - 2600, cp.y + 900, cp.z + 1500);
+  // spin: inside the centrifuge the whole sky wheels past the windows (the ring's axis is x in the ring's space)
+  placeSky(cp, now, spin = null) {
+    const q = spin === null ? new THREE.Quaternion() : new THREE.Quaternion().setFromAxisAngle(XAX, -spin);
+    const off = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(q).add(cp);
+    const sunDir = new THREE.Vector3(-2600, 900, 1500).normalize().applyQuaternion(q);
+    if (this.planet) { this.planet.position.copy(off(-2600, -900, -2200)); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); }
+    if (this.earth) { this.earth.position.copy(off(1500, 600, -3600)); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); }
+    this.stars.position.copy(cp); this.stars.quaternion.copy(q);
+    this.sun.position.copy(off(-2600, 900, 1500));
+    this.dest.position.copy(off(0, 300, -3000));
   }
   // Station visible from the hull and cameras during approach / docked (ship body frame; our port is at the bow)
   updateStation(S, now) {

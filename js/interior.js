@@ -295,6 +295,11 @@ export function buildDeckInterior(d) {
 // Corridor coordinates (x across, y up from the floor, z along the ring) are wrapped onto the ring:
 // world = centre + Rx(theta) * (x, -(R - y), 0) with theta = -z / R. "Up" always points at the hub.
 export const RING_CENTER = new THREE.Vector3(0, -400, 0);
+// viewports in corridor coordinates (shared with the exterior so the lit panes line up)
+export const RING_WINDOWS = (() => { const C = 2 * Math.PI * RING.R; return {
+  side: [0, 1, 2, 3, 4, 5].map((k) => (k / 6) * C), sideLen: 8, y0: 0.9, y1: 3.1,
+  floor: [0, 1, 2, 3, 4, 5].map((k) => ((k + 0.5) / 6) * C + 4.5), floorLen: 5, floorHalfW: 1.2,
+}; })();
 export function ringPlace(o, x, y, z) {
   const th = -z / RING.R;
   o.position.set(x, -(RING.R - y) * Math.cos(th), -(RING.R - y) * Math.sin(th));
@@ -306,14 +311,40 @@ export function buildRingInterior() {
   const g = new THREE.Group(); g.position.copy(RING_CENTER);
   const R = RING.R, W = RING.W, H = RING.H, C = 2 * Math.PI * R;
   const SEGS = 192;
-  // floor (the inside of a cylinder of radius R) and ceiling
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(R, R, W, SEGS, 1, true), new THREE.MeshStandardMaterial({ map: treadTex([48, 2]), side: THREE.BackSide, roughness: 0.55, metalness: 0.5 }));
-  floor.rotation.z = Math.PI / 2; g.add(floor);
+  // floor (the inside of a cylinder of radius R) and ceiling, with big viewports cut into both the floor and the side walls.
+  // Built as arcs: a corridor span z0..z1 is a cylinder sector starting at theta = z0/R - pi/2 (floor) and a ring sector
+  // starting at -z1/R - pi/2 (side walls), which is where ringPlace() puts the same corridor coordinates.
+  const floorMat = (len, wid) => new THREE.MeshStandardMaterial({ map: treadTex([Math.max(1, Math.round(len / 3.3)), Math.max(1, Math.round(wid / 3.2))]), side: THREE.BackSide, roughness: 0.55, metalness: 0.5 });
+  const floorArc = (z0, z1, x0, x1) => {
+    const geo = new THREE.CylinderGeometry(R, R, x1 - x0, Math.max(2, Math.ceil(z1 - z0)), 1, true, z0 / R - Math.PI / 2, (z1 - z0) / R);
+    const m = new THREE.Mesh(geo, floorMat(z1 - z0, x1 - x0)); m.rotation.z = Math.PI / 2; m.position.x = (x0 + x1) / 2; g.add(m); return m;
+  };
+  const wallMat = new THREE.MeshStandardMaterial({ map: closeoutTex([1, 1]), roughness: 0.9, side: THREE.DoubleSide });
+  const wallArc = (side, z0, z1, r0, r1) => {
+    const geo = new THREE.RingGeometry(r0, r1, Math.max(2, Math.ceil((z1 - z0) / 1.0)), 1, -z1 / R - Math.PI / 2, (z1 - z0) / R);
+    const m = new THREE.Mesh(geo, wallMat); m.rotation.y = Math.PI / 2; m.position.x = side * W / 2; g.add(m); return m;
+  };
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x9fb8d0, transparent: true, opacity: 0.1, roughness: 0.03, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
+  const spans = (wins) => { // complementary spans around the circumference for a list of [z0, z1] windows
+    const out = []; let z = 0; for (const [a, b] of wins) { if (a > z) out.push([z, a]); z = b; } if (z < C) out.push([z, C]); return out;
+  };
+  // floor: two full-length side strips and a centre strip broken by six 5 m viewports (stars wheel past beneath your feet)
+  const FW = RING_WINDOWS.floor.map((zc) => [zc - RING_WINDOWS.floorLen / 2, zc + RING_WINDOWS.floorLen / 2]);
+  floorArc(0, C, -W / 2, -RING_WINDOWS.floorHalfW); floorArc(0, C, RING_WINDOWS.floorHalfW, W / 2);
+  for (const [z0, z1] of spans(FW)) floorArc(z0, z1, -RING_WINDOWS.floorHalfW, RING_WINDOWS.floorHalfW);
+  for (const [z0, z1] of FW) {
+    const gl = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.01, R - 0.01, RING_WINDOWS.floorHalfW * 2, 12, 1, true, z0 / R - Math.PI / 2, (z1 - z0) / R), glass);
+    gl.rotation.z = Math.PI / 2; gl.userData.keep = true; g.add(gl);
+  }
   const ceil = new THREE.Mesh(new THREE.CylinderGeometry(R - H, R - H, W, SEGS, 1, true), new THREE.MeshStandardMaterial({ map: ceilTex([60, 3]), roughness: 0.9 }));
   ceil.rotation.z = Math.PI / 2; g.add(ceil);
-  for (const s of [-1, 1]) { // side walls: rings facing inward, lined with rack bays
-    const wall = new THREE.Mesh(new THREE.RingGeometry(R - H, R, SEGS, 1), new THREE.MeshStandardMaterial({ map: closeoutTex([1, 1]), roughness: 0.9, side: THREE.DoubleSide }));
-    wall.rotation.y = Math.PI / 2; wall.position.x = s * W / 2; g.add(wall);
+  // side walls: solid below 0.9 m and above 3.1 m; between, 8 m-long windows between the science bays, both sides
+  const SW = RING_WINDOWS.side.map((zc) => [zc - RING_WINDOWS.sideLen / 2, zc + RING_WINDOWS.sideLen / 2]);
+  const yb = RING_WINDOWS.y0, yt = RING_WINDOWS.y1;
+  for (const s of [-1, 1]) {
+    wallArc(s, 0, C, R - yb, R); wallArc(s, 0, C, R - H, R - yt);
+    for (const [z0, z1] of spans(SW)) wallArc(s, z0, z1, R - yt, R - yb);
+    for (const [z0, z1] of SW) { const gl = new THREE.Mesh(new THREE.RingGeometry(R - yt, R - yb, 12, 1, -z1 / R - Math.PI / 2, (z1 - z0) / R), glass); gl.rotation.y = Math.PI / 2; gl.position.x = s * (W / 2 + 0.02); gl.userData.keep = true; g.add(gl); }
   }
   const add = (geo, m, x, y, z, parent = g) => { const o = new THREE.Mesh(geo, m); ringPlace(o, x, y, z); parent.add(o); return o; };
   const accMat = emis(0x6be675, 0.7);
@@ -327,6 +358,21 @@ export function buildRingInterior() {
     const lamp = add(new THREE.PlaneGeometry(0.5, 2.2), emis(0xf6f4ec, 0.95), 0, H - 0.03, z + 1.5); lamp.rotateX(Math.PI / 2); lamp.userData.lamp = true; lamp.userData.keep = true;
     for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.028, 0.028, 2.4, 6), M.rail, s * (W / 2 - 0.32), 1.1, z + 1.5).rotateX(Math.PI / 2);
     add(new THREE.CylinderGeometry(0.028, 0.028, 2.2, 6), M.rail, 0.9, H - 0.35, z + 1.5).rotateX(Math.PI / 2);
+  }
+  // viewport frames: sills, headers and mullions on the side windows, a raised rim and a handrail round each floor viewport
+  for (const [z0, z1] of SW) for (const sd of [-1, 1]) {
+    const zc = (z0 + z1) / 2, x = sd * (W / 2 - 0.08);
+    add(new THREE.BoxGeometry(0.22, 0.14, z1 - z0 + 0.3), M.frame, x, yb - 0.04, zc);
+    add(new THREE.BoxGeometry(0.22, 0.14, z1 - z0 + 0.3), M.frame, x, yt + 0.04, zc);
+    for (let k = 1; k < 4; k++) add(new THREE.BoxGeometry(0.16, yt - yb, 0.12), M.frame, x, (yb + yt) / 2, z0 + (k * (z1 - z0)) / 4);
+    add(new THREE.BoxGeometry(0.34, 0.06, z1 - z0), M.dark, sd * (W / 2 - 0.2), yb + 0.02, zc);
+  }
+  for (const [z0, z1] of FW) {
+    const zc = (z0 + z1) / 2, hw = RING_WINDOWS.floorHalfW;
+    for (const sd of [-1, 1]) { add(new THREE.BoxGeometry(0.12, 0.06, z1 - z0 + 0.24), M.hazard, sd * (hw + 0.06), 0.03, zc); add(new THREE.CylinderGeometry(0.03, 0.03, z1 - z0, 8), M.rail, sd * (hw + 0.15), 0.85, zc).rotateX(Math.PI / 2); for (const zz of [z0 + 0.3, zc, z1 - 0.3]) add(new THREE.BoxGeometry(0.04, 0.85, 0.04), M.steel, sd * (hw + 0.15), 0.43, zz); }
+    for (const zz of [z0 - 0.06, z1 + 0.06]) add(new THREE.BoxGeometry(hw * 2 + 0.24, 0.06, 0.12), M.hazard, 0, 0.03, zz);
+    add(new THREE.BoxGeometry(hw * 2, 0.04, 0.1), M.dark, 0, 0.01, zc);
+    const lab = textSprite('VIEWPORT · 4 PANES, 40 mm · DO NOT STAND IN THE GLASS', { width: 2.2, size: 24, color: '#bcd8ff' }); ringPlace(lab, 0, 1.25, z0 - 0.3); g.add(lab);
   }
   // accent light strips where floor meets the walls
   for (const s of [-1, 1]) { const strip = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.02, R - 0.02, 0.05, SEGS, 1, true), new THREE.MeshBasicMaterial({ color: 0x6be675, side: THREE.BackSide })); strip.rotation.z = Math.PI / 2; strip.position.x = s * (W / 2 - 0.05); strip.userData.keep = true; g.add(strip); }
