@@ -1,6 +1,7 @@
 // Ship layout in the exterior (ship) frame and a signed-distance model of the hull for EVA collisions.
 // Frame: x = starboard, y = dorsal, z = aft (the bow points to -z, the drive to +z). Units: metres.
 // No three.js here, so the controller (and node tests) can use it.
+import { COMPS } from './config.js';
 
 export const SL = {
   R: 12.2,                         // pressure-module hull radius (the interior decks are 22 m drums)
@@ -87,4 +88,27 @@ export function hullNormal(x, y, z) {
   const nx = hullSDF(x + e, y, z) - hullSDF(x - e, y, z), ny = hullSDF(x, y + e, z) - hullSDF(x, y - e, z), nz = hullSDF(x, y, z + e) - hullSDF(x, y, z - e);
   const n = len3(nx, ny, nz) || 1;
   return [nx / n, ny / n, nz / n];
+}
+
+// ---------------- external component mounts and PDC firing arcs ----------------
+// outward normal (local +y) of an external component's mount
+export function extNormal(id) {
+  const c = COMPS[id];
+  switch (id) {
+    case 'radA': return [-1, 0, 0];
+    case 'radB': return [1, 0, 0];
+    case 'pdc3': case 'railgun': return [0, -1, 0];
+    case 'launcher': case 'antenna': return [0, 1, 0];
+    default: { const l = Math.hypot(c.ex, c.ey) || 1; return [c.ex / l, c.ey / l, 0]; }
+  }
+}
+// muzzle position of a gatling (ship frame): the gun sits ~1.6 m out from its mount
+export function pdcMuzzle(id) { const c = COMPS[id], n = extNormal(id); return [c.ex + n[0] * 1.6, c.ey + n[1] * 1.6, c.ez + n[2] * 1.6]; }
+// can this turret bear on a target in direction d (unit, ship frame)? Above its own horizon and with no hull in the way.
+export function pdcCanSee(id, d) {
+  const n = extNormal(id);
+  if (d[0] * n[0] + d[1] * n[1] + d[2] * n[2] < -0.12) return false;
+  const p = pdcMuzzle(id);
+  for (const s of [2, 4, 7, 11, 16, 24, 35, 50, 70]) if (hullSDF(p[0] + d[0] * s, p[1] + d[1] * s, p[2] + d[2] * s) < 0.15) return false;
+  return true;
 }

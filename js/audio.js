@@ -30,9 +30,36 @@ export class Sfx {
     const src = c.createBufferSource(); src.buffer = this.buf[name]; src.playbackRate.value = rate; src.loop = loop;
     if (loop) { src.loopStart = loopStart; src.loopEnd = loopEnd || src.buffer.duration; }
     const g = c.createGain(); g.gain.value = vol;
-    src.connect(g); g.connect(dest || this.master); src.start(t, offset);
+    src.connect(g); g.connect(dest || this.out()); src.start(t, offset);
     return { src, g, t };
   }
+  // ---- where weapon noise comes from: conducted through the structure, never through the vacuum ----
+  // Inside, gunfire, launches and impacts reach you as low thuds through the hull (low-pass ~420 Hz, a resonant
+  // hump around 110 Hz). On EVA the only path is through your gloves and the tether: duller and quieter still.
+  out() { return this._route || this.master; }
+  hullBus() {
+    if (!this.ctx) return null;
+    if (!this._hull || this._hull.ctx !== this.ctx) {
+      const c = this.ctx;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = 0.9;
+      const lp2 = c.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 900; lp2.Q.value = 0.5;
+      const pk = c.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = 110; pk.Q.value = 1.2; pk.gain.value = 7;
+      const g = c.createGain(); g.gain.value = 1.5;
+      lp.connect(lp2); lp2.connect(pk); pk.connect(g); g.connect(this.master);
+      this._hull = { ctx: c, in: lp, lp, g };
+    }
+    return this._hull.in;
+  }
+  setEnv(env) { // 'inside' | 'eva'
+    if (env === this.env) return;
+    this.env = env;
+    if (!this.ctx) return;
+    this.hullBus();
+    const t = this.now(), h = this._hull;
+    h.lp.frequency.setTargetAtTime(env === 'eva' ? 170 : 420, t, 0.1);
+    h.g.gain.setTargetAtTime(env === 'eva' ? 0.6 : 1.5, t, 0.1);
+  }
+  muffled(fn) { const prev = this._route; this._route = this.hullBus(); try { return fn(); } finally { this._route = prev; } }
   setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.5; }
   noiseBuf() {
     if (this._nb) return this._nb;
@@ -58,7 +85,7 @@ export class Sfx {
     const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t);
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + slide), t + dur);
     const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.02);
+    o.connect(g); g.connect(this.out()); o.start(t); o.stop(t + dur + 0.02);
   }
   noise(dur = 0.5, vol = 0.4, freq = 800, delay = 0) {
     if (!this.ctx) return;
@@ -66,10 +93,11 @@ export class Sfx {
     const n = c.createBufferSource(); n.buffer = this.noiseBuf();
     const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(freq, t); f.frequency.exponentialRampToValueAtTime(60, t + dur);
     const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    n.connect(f); f.connect(g); g.connect(this.master); n.start(t); n.stop(t + dur + 0.05);
+    n.connect(f); f.connect(g); g.connect(this.out()); n.start(t); n.stop(t + dur + 0.05);
   }
   play(name) {
     if (!this.ctx || this.muted) return;
+    if (!this._route && ['hit', 'boom', 'rail', 'launch', 'pdc', 'srm', 'ignite'].includes(name)) return this.muffled(() => this.play(name));
     switch (name) {
       case 'shipwarn': { // a fault, fire or breach: one tone of the ship's malfunction alarm (rate-limited)
         const t = this.now(); if (t - (this.lastWarn || -9) < 1.5) break; this.lastWarn = t;
@@ -156,6 +184,7 @@ export class Sfx {
   // weapons
   gatling(dur = 1.2, n = 1) { // ~65 rounds/s per gun: a ripping buzz of individual reports
     if (!this.ctx || this.muted) return;
+    if (!this._route) return this.muffled(() => this.gatling(dur, n));
     if (this.buf && this.buf.pdc) { // recorded Phalanx burst; more turrets = a second, slightly detuned gun just behind
       this.sample('pdc', { vol: 0.75, rate: 0.96 + Math.random() * 0.08 });
       if (n > 1) this.sample('pdc', { vol: 0.45, rate: 0.9 + Math.random() * 0.06, delay: 0.06 + Math.random() * 0.05 });
@@ -169,12 +198,12 @@ export class Sfx {
     const lg = c.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(am.gain);
     const g = c.createGain(); const v = 0.22 * Math.min(1.6, 0.7 + n * 0.3);
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.12); g.gain.setValueAtTime(v, t + dur - 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(bp); bp.connect(am); am.connect(g); g.connect(this.master);
+    src.connect(bp); bp.connect(am); am.connect(g); g.connect(this.out());
     src.start(t); lfo.start(t); src.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
     const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(65, t);
     const og = c.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.06, t + 0.1); og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     const olp = c.createBiquadFilter(); olp.type = 'lowpass'; olp.frequency.value = 180;
-    o.connect(olp); olp.connect(og); og.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
+    o.connect(olp); olp.connect(og); og.connect(this.out()); o.start(t); o.stop(t + dur + 0.05);
   }
   bootBeep(vol = 1, delay = 0) { this.chirp(1396, 0.07, 0.04 * vol, delay); this.chirp(2093, 0.05, 0.03 * vol, delay + 0.08); }
   setConsoleHum(on) {

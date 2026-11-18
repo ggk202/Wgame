@@ -11,9 +11,17 @@ export const btn = (label, act, args = {}, extra = '') => `<button class="btn ${
 
 // ---------------- panel widget builder ----------------
 export class Builder {
-  constructor(body, ctx) { this.body = body; this.ctx = ctx; this.ws = []; }
-  _add(el, update) { this.body.appendChild(el); if (update) this.ws.push(update); return el; }
-  section(title) { const e = document.createElement('h4'); e.textContent = title; return this._add(e); }
+  // Content before the first section is pinned at the top of the console; each section becomes a tab page.
+  constructor(body, ctx) {
+    this.body = body; this.ctx = ctx; this.ws = []; this.pages = [];
+    this.pin = document.createElement('div'); this.pin.className = 'ppin'; body.appendChild(this.pin); this.cur = this.pin;
+  }
+  _add(el, update) { this.cur.appendChild(el); if (update) this.ws.push(update); return el; }
+  section(title) {
+    const page = document.createElement('div'); page.className = 'ppage'; page.dataset.title = title;
+    this.body.appendChild(page); this.pages.push(page); this.cur = page;
+    const e = document.createElement('h4'); e.textContent = title; return this._add(e);
+  }
   note(text) { const e = document.createElement('div'); e.className = 'note'; if (typeof text === 'function') return this._add(e, (S) => { e.innerHTML = text(S); }); e.innerHTML = text; return this._add(e); }
   kv(label, fn) {
     const e = document.createElement('div'); e.className = 'kv';
@@ -130,7 +138,7 @@ export class PanelView {
   // Overlay mode (lockers, lift, status board via Tab): a free-standing terminal in the middle of the view.
   place(rect) {
     if (!this.open) return;
-    const LW = 600;
+    const LW = this.root.classList.contains('two') ? 900 : 640; // two-column consoles get a wider virtual screen
     if (this.mode === 'screen') {
       if (!rect || rect.w < 40) { this.root.style.opacity = 0; this.exit.style.display = 'none'; return; }
       const scale = rect.w / LW;
@@ -155,7 +163,7 @@ export class PanelView {
     this.root.style.transform = ''; this.root.style.width = ''; this.root.style.height = ''; this.root.style.opacity = mode === 'screen' ? 0 : 1; this.root.style.pointerEvents = '';
     this.compId = compId; this.def = def;
     this.title.textContent = def.title;
-    this.body.innerHTML = '';
+    this.body.innerHTML = ''; this.tabSel = null;
     this.builder = new Builder(this.body, this.ctx);
     if (compId && COMPS[compId]) {
       const b = this.builder;
@@ -172,10 +180,30 @@ export class PanelView {
       });
     }
     def.build(this.builder, this.ctx, compId);
+    this.makeTabs(def);
     this.root.style.display = 'flex';
     this.open = true;
     this.startBoot(def.title, compId || def.title);
   }
+  // Two or more sections: a tab strip under the pinned part, one page at a time (remembered per console)
+  makeTabs(def) {
+    const pages = this.builder.pages;
+    this.root.classList.toggle('tabbed', pages.length > 1);
+    if (pages.length < 2) return;
+    this.tabMem = this.tabMem || {};
+    const bar = document.createElement('div'); bar.className = 'ptabs';
+    const tabs = pages.map((pg, i) => {
+      const b = document.createElement('button'); b.className = 'ptab'; b.textContent = pg.dataset.title; b.type = 'button';
+      b.onclick = () => { this.ctx.click && this.ctx.click(); sel(i); };
+      bar.appendChild(b); return b;
+    });
+    const sel = (i) => { this.tabMem[def.title] = i; pages.forEach((pg, k) => { pg.style.display = k === i ? '' : 'none'; tabs[k].classList.toggle('sel', k === i); }); this.body.scrollTop = 0; };
+    this.body.insertBefore(bar, pages[0]);
+    this.tabSel = sel; this.tabCount = pages.length;
+    sel(Math.min(this.tabMem[def.title] || 0, pages.length - 1));
+  }
+  // [ and ] (or Q/E on a gamepad-less keyboard while not piloting) flip tabs
+  cycleTab(d) { if (!this.tabSel) return; const i = ((this.tabMem[this.def.title] || 0) + d + this.tabCount) % this.tabCount; this.tabSel(i); }
   // CRT power-on + POST text, with relay clicks. Full sequence on a cold console, short one if it was used recently.
   startBoot(title, key) {
     clearTimeout(this.bootTimer); (this.bootTimers || []).forEach(clearTimeout);
@@ -207,6 +235,12 @@ export class PanelView {
       this.stat.innerHTML = `<span class="${cls(c.hp, 60, 25)}">INTEG ${Math.round(c.hp)}%</span> <span class="${e > 0 ? 'good' : 'bad'}">${e > 0 ? '● ONLINE' : '○ OFFLINE'}</span>`;
     } else this.stat.textContent = '';
     this.builder.update(S);
+    // "desktop" layout: when the pinned part holds a live view (telescope, docking camera), it sits in a left column
+    // and the tabs fill the right, so nothing needs scrolling
+    if (this.mode === 'screen' && this.builder.pages.length > 1) {
+      const v = [...this.builder.pin.querySelectorAll('.viewhost')].some((e) => e.style.display !== 'none');
+      if (v !== this.root.classList.contains('two')) this.root.classList.toggle('two', v);
+    } else if (this.root.classList.contains('two')) this.root.classList.remove('two');
   }
 }
 

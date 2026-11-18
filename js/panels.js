@@ -67,7 +67,7 @@ export const PANELS = {
         if (i.slack < 0) return `<span class="bad">OVERSHOOTING — stopping distance ${fmtDist(i.stop)} exceeds range. Flip and decelerate hard!</span>`;
         return `Stopping distance at ${S.nav.plan.g.toFixed(2)} g: ${fmtDist(i.stop)}. ${S.drive.orient < 0 ? 'Decelerating.' : `Flip and start the decel burn in about <b>${fmtTime(real)}</b> (real time).`}`;
       });
-      B.section('Combat maneuvering');
+      B.section('Combat');
       B.toggle('Evasive jinking', (S) => S.drive.evasive, 'helm.evasive', (v) => ({ on: v }));
       B.seg('Range', [{ v: 'hold', l: 'Hold' }, { v: 'open', l: 'Open range' }, { v: 'close', l: 'Close' }], (S) => S.drive.maneuver, 'helm.maneuver', (v) => ({ m: v }));
       B.note((S) => { const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone); const aim = t ? angDeg(nose(S.att.q), t.dir) : null; return (t ? `<b>${aim <= RAIL_CONE ? 'RAIL SOLUTION' : 'Target ' + aim.toFixed(1) + '° off the nose'}</b> · ` : '') + 'The spinal railgun only fires along the nose: point the ship at the target (SAS Target, or by hand). Nose-on you also present a much smaller silhouette. Rotating or jinking spoils enemy railgun solutions; jinking adds 1.2 g.'; });
@@ -162,7 +162,7 @@ export const PANELS = {
       telescopeBlock(B);
       B.kv('Target', (S) => { const e = S.enc && S.enc.enemies.find((x) => x.id === S.sensors.lock); return e ? { text: `${e.name} · ${e.range.toFixed(0)} km · lock ${pct(S.sensors.q)}`, cls: S.sensors.q > 0.4 ? 'good' : 'warn' } : { text: 'NO LOCK — select a contact below', cls: 'warn' }; });
       B.html((S) => contactList(S));
-      B.section('Spinal railgun');
+      B.section('Railgun');
       B.bar('Capacitor', (S) => ({ v: S.weap.rail, text: S.weap.rail >= 1 ? 'CHARGED' : pct(S.weap.rail) + (S.weap.charging ? ' charging (20 MW)' : ''), cls: S.weap.rail >= 1 ? 'good' : 'warn' }));
       B.buttons([
         { label: 'Charge', labelFn: (S) => (S.weap.charging ? 'Stop charging' : 'Charge capacitor'), act: 'tac.charge', args: () => ({ on: !B.ctx.S().weap.charging }) },
@@ -174,11 +174,11 @@ export const PANELS = {
         { label: 'LAUNCH TORPEDO', cls: 'red', act: 'tac.torp', enabled: (S) => S.weap.tubes.some((t) => t.loaded) && !!S.enc },
         { label: 'Deploy chaff', act: 'tac.chaff', labelFn: (S) => `Deploy chaff (${S.stores.chaff})`, enabled: (S) => !!S.enc && S.stores.chaff > 0 },
       ]);
-      B.section('Missile launcher (Kestrel, 8 cells)');
+      B.section('Missiles');
       B.kv('Cells', (S) => ({ text: `${'▮'.repeat(S.weap.cells)}${'▯'.repeat(8 - S.weap.cells)}  ${S.weap.cells}/8 ready · ${S.stores.srm} in stock${S.weap.cells < 8 && S.stores.srm > 0 ? ` · reloading ${pct(S.weap.cellT / 18)}` : ''}`, cls: S.weap.cells ? 'good' : 'warn' }));
       B.buttons([1, 2, 4].map((n) => ({ label: `SALVO ×${n}`, cls: 'red', act: 'tac.srm', args: () => ({ n }), enabled: (S) => !!S.enc && S.weap.cells >= n && eff(S, 'launcher') > 0 })));
       B.note('Kestrels are small, fast and cheap: each hits for less than a torpedo, but salvoes swamp enemy point defence. The launcher reloads one cell every 18 s from stock (fabricate more at Cargo).');
-      B.section('Point defence (gatling PDCs)');
+      B.section('Point defence');
       B.seg('Mode', [{ v: 'auto', l: 'Auto' }, { v: 'manual', l: 'Manual' }, { v: 'off', l: 'Off' }], (S) => S.weap.pdcMode, 'tac.pdc', (v) => ({ mode: v }), (S, v) => v !== 'auto' || S.settings.autoPDC);
       B.kv('Turrets / ammo', (S) => `${PDCS.map((id) => pct(eff(S, id))).join(' · ')} · ${S.stores.pdcAmmo} rds`);
       B.html((S) => {
@@ -504,7 +504,7 @@ function drawRing(g, S, w, h) {
 }
 // external camera feeds: rendered by the main renderer into the console
 function camBlock(B) {
-  B.section('External cameras');
+  B.section('Cameras');
   B.view('cams');
   B.buttons([
     { label: '◀ Prev camera', onClick: () => B.ctx.cams && (B.ctx.cams.cam -= 1) },

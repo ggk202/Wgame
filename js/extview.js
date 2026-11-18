@@ -58,7 +58,7 @@ export class ExtView {
   }
   onFx(f) { if (['efire', 'ehit', 'edead', 'pdc', 'rail', 'launch'].includes(f.type)) this.fx.push({ ...f, t: 0 }); }
   size() {
-    const w = Math.max(200, this.wrap.clientWidth), h = Math.round(w * 0.56);
+    const w = Math.max(200, this.wrap.clientWidth), h = Math.round(Math.min(w * 0.56, this.mode === 'dock' ? 300 : 225)); // short enough to leave room for the console's tabs
     if (this.canvas.width !== Math.round(w * this.renderer.getPixelRatio()) || this.lastH !== h) {
       this.renderer.setSize(w, h, false); this.canvas.style.width = '100%'; this.canvas.style.height = h + 'px';
       this.overlay.width = w * 2; this.overlay.height = h * 2; this.overlay.style.height = h + 'px'; this.lastH = h;
@@ -66,7 +66,7 @@ export class ExtView {
     return [w, h];
   }
   render(S, dt, now) {
-    if (!this.renderer || !this.host || !this.wrap.isConnected) return;
+    if (!this.renderer || !this.host || !this.wrap.isConnected || !this.wrap.offsetParent) return;
     const [w, h] = this.size();
     if (this.mode === 'dock') this.renderDock(S, now, w, h); else this.renderTelescope(S, dt, now, w, h);
   }

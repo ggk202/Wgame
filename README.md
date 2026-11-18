@@ -50,7 +50,11 @@ The CSV Wolfram is about 150 m long. From bow to stern:
 Weapons:
 
 * **Spinal railgun:** twin ventral rails run the length of the modules, with the muzzle beside the bow port.
-* **Three 6-barrel gatling PDCs:** each one tracks threats, spins up and fires tracer streams.
+* **Three 6-barrel gatling PDCs:** two dorsal and one ventral. Each gun picks its own target, either a torpedo you've flagged in manual mode or the nearest threat it can see. It then slews onto that torpedo's actual approach path, spins up and walks tracer streams onto it.
+  * **Firing arcs:** a gun only fires on what it can see from its mount, above its own horizon and with no hull in the way. A torpedo from a blind angle gets through unopposed unless the helm rolls the ship.
+  * **Salvos:** torpedoes arrive on their own curving paths, so a salvo comes in from several directions at once.
+  * **Idle:** the guns sweep slowly when there's nothing to shoot.
+* **Seeing ordnance:** torpedoes, tracers, missiles and explosions are drawn in the space around the ship, so you see them from EVA, on the external cameras, and through the bridge windows, the skylights and the ring's viewports.
 * **Dorsal 8-cell launcher:** fires Kestrel short-range missiles. It reloads itself from stock, fires salvos of 1, 2 or 4, and its cell lids pop as the missiles boost out.
 
 Nine **external cameras** can be cycled at the Helm and at Fire Control. They are CCTV feeds rendered live into the console.
@@ -71,6 +75,10 @@ Static geometry is merged by material, so the detail stays cheap to draw.
 * **Malfunction alarm:** this marks real ship trouble. One tone sounds per fault, fire or breach. The full alarm repeats during red alert while something is burning, breached, destroyed or the reactor is down. Combat alone keeps the synthesized klaxon.
 
 If a recording fails to load, everything falls back to synthesis.
+
+**Muffled weapons:** there is no sound in vacuum. Inside, gunfire, launches and impacts reach you as low thuds conducted through the hull (low-passed with a resonant hump). On EVA they reach you only through your gloves and the tether, so they're duller and quieter still.
+
+**Console tabs:** each console keeps its most important controls pinned at the top, with everything else in tabs. Click a tab, or flip between them with `[` and `]`. On consoles with a live view (the Fire Control and Sensors telescopes, and the Helm's docking camera during an approach), the view sits in a left column and the tabs fill the right, so nothing needs scrolling.
 
 ## Flying the ship
 

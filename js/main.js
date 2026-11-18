@@ -89,7 +89,7 @@ class CamView {
   }
   attach(host) { host.appendChild(this.wrap); }
   render(S, now) {
-    if (!this.wrap.isConnected || !G.world) return;
+    if (!this.wrap.isConnected || !this.wrap.offsetParent || !G.world) return; // not on screen (another console tab)
     if (now - this.t < 1 / 20) return; // 20 fps is plenty for a CCTV feed
     this.t = now;
     const C = G.world.renderExtCam(S, this.cam, this.canvas, now);
@@ -330,6 +330,7 @@ function onKey(k, e) {
   if (k === '`' || k === 'f9') { if (G.S && G.S.debug) { G.panel.open && G.panelKind === 'debug' ? closePanel() : openPanel('debug'); } return true; }
   if (k === 'm') { G.sfx.setMuted(!G.sfx.muted); G.hud.toast(G.sfx.muted ? 'Sound muted' : 'Sound on'); return true; }
   if (G.S && G.S.vote && /^[1-4]$/.test(k)) { const o = G.S.vote.options[+k - 1]; if (o) act('vote', { opt: o.id }); return true; }
+  if (G.panel.open && (k === '[' || k === ']')) { G.panel.cycleTab(k === ']' ? 1 : -1); return true; }
   if (G.panel.open && (k === 'e')) { closePanel(); return true; }
   return false;
 }
@@ -462,6 +463,7 @@ function frame(tms) {
   G.world.render();
   if (G.panel.open) G.panel.place(G.world.focusRect());
   document.body.classList.toggle('focused', !!G.world.focus);
+  G.sfx.setEnv(G.ctl.deck === EXT_DECK ? 'eva' : 'inside');
   G.sfx.tick(dt, S.alert, S.breaches.length > 0 || S.hull < 40 || S.reactor.state !== 'running' || Object.values(S.comps).some((c) => c.fire > 0 || c.hp <= 0));
   // hand controllers: keys + on-screen pads while seated at the helm
   if (G.panel.open && G.panelComp === 'helm' && G.world.focus) {

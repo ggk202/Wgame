@@ -84,7 +84,7 @@ export const COMPS = {
   radB:       { name: 'Radiator Wing B (starboard)', ext: true, ex: 5.6, ey: 0, ez: -8, fp: 1.0, mesh: 'radiator', power: 0.3, wear: 0.25, prio: 1 },
   pdc1:       { name: 'PDC Gatling 1 (port)', ext: true, ex: -8.8, ey: 8.9, ez: -53, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
   pdc2:       { name: 'PDC Gatling 2 (starboard)', ext: true, ex: 8.8, ey: 8.9, ez: -53, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
-  pdc3:       { name: 'PDC Gatling 3 (ventral)', ext: true, ex: 0, ey: -5.6, ez: 15, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
+  pdc3:       { name: 'PDC Gatling 3 (ventral)', ext: true, ex: 0, ey: -4.1, ez: -10, fp: 1.1, mesh: 'pdc', power: 0.5, wear: 0.15, prio: 1 },
   railgun:    { name: 'Spinal Railgun', ext: true, ex: 0, ey: -13.9, ez: -54, fp: 1.6, mesh: 'railgun', power: 0.3, wear: 0.15, prio: 2 },
   launcher:   { name: 'Missile Launcher (8-cell)', ext: true, ex: 0, ey: 13.1, ez: -42, fp: 1.4, mesh: 'launcher', power: 0.3, wear: 0.15, prio: 2 },
   antenna:    { name: 'High-Gain Antenna', ext: true, ex: -4.6, ey: 6.0, ez: 2, fp: 1.0, mesh: 'antenna', power: 0.3, wear: 0.15, prio: 3 },

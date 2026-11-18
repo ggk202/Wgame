@@ -4,7 +4,7 @@
 // shield and the magnetic nozzle. Mostly symmetric, with the practical asymmetries a working ship collects.
 import * as THREE from 'three';
 import { COMPS, COMP_IDS, EXT, RING } from './config.js';
-import { SL } from './hull.js';
+import { SL, extNormal } from './hull.js';
 import { PAL, mat, metal, emis, texMat, mliTex, goldMat, radiatorTex, grateTex, decalTex, screenTex, textSprite, struts } from './models.js';
 import { bakeStatic, hazardTex, RING_WINDOWS } from './interior.js';
 
@@ -171,18 +171,6 @@ function labelTex(text, fg, bg) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 export { flashTex };
-
-// placement of external components on the hull: local +y along the outward normal
-export function extNormal(id) {
-  const c = COMPS[id];
-  switch (id) {
-    case 'radA': return [-1, 0, 0];
-    case 'radB': return [1, 0, 0];
-    case 'pdc3': case 'railgun': return [0, -1, 0];
-    case 'launcher': case 'antenna': return [0, 1, 0];
-    default: { const l = Math.hypot(c.ex, c.ey) || 1; return [c.ex / l, c.ey / l, 0]; }
-  }
-}
 
 // ---------------- external cameras (cycled at the Helm and Fire Control) ----------------
 export const EXT_CAMS = [

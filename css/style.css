@@ -307,3 +307,16 @@ body.focused #tut .tut-title { font-size: 14px; }
 body.touch #tut { top: calc(36px + env(safe-area-inset-top)); }
 #tvert { position: fixed; right: calc(16px + env(safe-area-inset-right)); bottom: calc(250px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
 #tvert .tb { width: 86px; }
+/* console tabs: pinned top section, then one page at a time */
+#panel .ptabs, .pbody .ptabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 6px; border-bottom: 1px solid var(--amb-d, #a8581a); }
+#panel .ptab { font: inherit; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; padding: 5px 10px 4px; background: transparent; color: var(--amb-d, #a8581a); border: 1px solid var(--amb-d, #a8581a); border-bottom: 0; cursor: pointer; }
+#panel .ptab:hover { color: var(--amb, #ff8a1e); }
+#panel .ptab.sel { background: var(--amb, #ff8a1e); color: #120700; border-color: var(--amb, #ff8a1e); }
+#panel.tabbed .ppage > h4:first-child { display: none; }
+.pbody .ptabs { border-color: var(--line); }
+.pbody .ptab { font: inherit; font-size: 11px; padding: 4px 9px; background: transparent; color: var(--dim); border: 1px solid var(--line); border-bottom: 0; cursor: pointer; }
+.pbody .ptab.sel { color: var(--text); background: rgba(255,255,255,0.08); }
+#panel.two .pbody { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); grid-auto-rows: min-content; column-gap: 14px; align-items: start; }
+#panel.two .ppin { grid-column: 1; grid-row: 1 / span 40; position: sticky; top: 0; }
+#panel.two .ptabs, #panel.two .ppage { grid-column: 2; }
+#panel.two .ptabs { margin-top: 0; }

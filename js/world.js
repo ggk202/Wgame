@@ -10,6 +10,7 @@ import { buildDeckInterior, buildRingInterior, ringPlace, RING_CENTER } from './
 import { buildShipExterior, buildExtComp, EXT_CAMS, flashTex } from './ship.js';
 import { SL } from './hull.js';
 import { qrot, qconj } from './attitude.js';
+import { projBodyDir } from './combat.js';
 
 export { textSprite, buildComp, buildFire, buildAvatar, buildShipExterior, buildExtComp, buildRingInterior, buildDeckInterior };
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -358,6 +359,8 @@ export class World {
     this.hemi.intensity = eva ? 0.22 : (ring ? 0.9 : 0.75) * powerDim;
     this.scene.environmentIntensity = eva ? 0.35 : 0.6 * powerDim;
     this.sunlight.intensity = eva ? 3.4 : 0;
+    this.camDeck = deck;
+    this.placeSpaceFx(deck, S);
     this.updateExterior(S, now, dt);
     const lampCol = new THREE.Color(lc.r * 0.95 * powerDim, lc.g * 0.95 * powerDim, lc.b * 0.95 * powerDim);
     for (const g of this.decks) if (g.visible && g !== this.exterior) g.traverse((o) => { if (o.userData.lamp) o.material.color.copy(lampCol); });
@@ -476,31 +479,62 @@ export class World {
   }
 
   // ---------------- hull animation and weapon effects ----------------
+  // Everything flying outside (tracers, missiles, torpedoes, explosions) lives in spaceFx, in ship-frame coordinates.
+  // Each frame spaceFx is placed so it lines up with wherever the camera is: around the hull on EVA and for the external
+  // cameras, or around the current deck or the spinning ring, so ordnance is seen through the windows.
   buildFxPools() {
-    // tracers: one LineSegments buffer of short streaks
-    this.trMax = 900;
+    this.spaceFx = new THREE.Group(); this.scene.add(this.spaceFx);
+    this.trMax = 1400;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.trMax * 6), 3));
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.trMax * 6), 3));
     this.tracerMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    this.tracerMesh.frustumCulled = false; this.exterior.add(this.tracerMesh);
+    this.tracerMesh.frustumCulled = false; this.spaceFx.add(this.tracerMesh);
     const hg = new THREE.BufferGeometry(); // bright heads so each round reads at any distance (lines are only 1 px)
     hg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.trMax * 3), 3));
     hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.trMax * 3), 3));
     this.tracerHeads = new THREE.Points(hg, new THREE.PointsMaterial({ size: 3.5, sizeAttenuation: false, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    this.tracerHeads.frustumCulled = false; this.exterior.add(this.tracerHeads);
-    this.tracers = [];
-    this.missiles = [];
+    this.tracerHeads.frustumCulled = false; this.spaceFx.add(this.tracerHeads);
+    this.tracers = []; this.missiles = []; this.torps = {};
     this.flashMat = new THREE.SpriteMaterial({ map: flashTex(), color: 0xffd090, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
     this.sprites = [];
+    const M = new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0));
+    this.qShipToDeck = new THREE.Quaternion().setFromRotationMatrix(M); // decks: the nose is "up", dorsal is "north"
+    const MR = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0));
+    this.qShipToRing = new THREE.Quaternion().setFromRotationMatrix(MR); // ring: the ship's axis is the ring's axis
   }
-  sprite(color, scale) {
+  // which point of the ship frame sits at a deck's floor centre
+  static DECK_Z = [33, -38, -48, -72, -82];
+  placeSpaceFx(deck, S, forExterior = false) {
+    const f = this.spaceFx;
+    if (forExterior || deck === EXT_DECK) { f.position.copy(this.exterior.position); f.quaternion.identity(); return; }
+    if (deck === RING_DECK) {
+      f.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(XAX, -(S.ring ? S.ring.spin : 0))).multiply(this.qShipToRing);
+      f.position.copy(RING_CENTER).sub(new THREE.Vector3(0, 0, SL.ringZ).applyQuaternion(f.quaternion));
+      return;
+    }
+    f.quaternion.copy(this.qShipToDeck);
+    f.position.set(0, deck * DECK_H, 0).sub(new THREE.Vector3(0, 0, World.DECK_Z[deck]).applyQuaternion(f.quaternion));
+  }
+  sprite(color, scale, life = 0.3) {
     let s = this.sprites.find((x) => !x.visible);
-    if (!s) { s = new THREE.Sprite(this.flashMat.clone()); this.exterior.add(s); this.sprites.push(s); }
-    s.material.color.setHex(color); s.material.opacity = 1; s.scale.setScalar(scale); s.visible = true; return s;
+    if (!s) { s = new THREE.Sprite(this.flashMat.clone()); this.spaceFx.add(s); this.sprites.push(s); }
+    s.material.color.setHex(color); s.material.opacity = 1; s.scale.setScalar(scale); s.visible = true; s.userData.t = 0; s.userData.life = life; s.userData.s0 = scale;
+    return s;
   }
   // direction from an inertial bearing to the ship frame
   bodyDir(S, dir) { const b = qrot(qconj(S.att.q || [0, 0, 0, 1]), dir || [0, 0, -1]); return new THREE.Vector3(b[0], b[1], b[2]).normalize(); }
+  // where an inbound threat is drawn: on its approach bearing, compressed so the last 60 km fit in ~750 m
+  threatPos(S, t, out = new THREE.Vector3()) {
+    const d = projBodyDir(S, t);
+    const vd = 30 + Math.max(0, t.range) * 12;
+    return out.set(d[0] * vd, d[1] * vd, d[2] * vd - 40);
+  }
+  explode(p, big = 1) {
+    const s = this.sprite(0xffc070, 26 * big, 0.9); s.position.copy(p);
+    const s2 = this.sprite(0xffffff, 10 * big, 0.25); s2.position.copy(p);
+    for (let i = 0; i < 18; i++) { const d = new THREE.Vector3().randomDirection(); this.addTracer(p.clone(), d, 30 + Math.random() * 60, 4, 1.4, [1, 0.6 + Math.random() * 0.3, 0.25]); }
+  }
   onFx(f) {
     if (!this._S) return;
     const S = this._S;
@@ -512,32 +546,61 @@ export class World {
         lid.userData.open = 1.6 + i * 0.25;
         const p = new THREE.Vector3(); lid.getWorldPosition(p); this.exterior.worldToLocal(p);
         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(L.group.quaternion);
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.2, 10), mat(0xe8e6df)); m.add(Object.assign(new THREE.Sprite(this.flashMat.clone()), {}));
-        m.children[0].position.y = -1.3; m.children[0].scale.setScalar(1.8); m.children[0].material.color.setHex(0xffc070);
-        m.position.copy(p); this.exterior.add(m);
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.2, 10), mat(0xe8e6df));
+        const pl = new THREE.Sprite(this.flashMat.clone()); pl.position.y = -1.3; pl.scale.setScalar(1.8); pl.material.color.setHex(0xffc070); m.add(pl);
+        m.position.copy(p); this.spaceFx.add(m);
         this.missiles.push({ m, t: -i * 0.25, v: up.clone().multiplyScalar(12), up, tdir });
         m.visible = false;
       }
-    } else if (f.type === 'pdc') {
-      this.pdcDir = f.dir ? this.bodyDir(S, f.dir) : null;
+    } else if (f.type === 'pkill') { // a gatling stream caught a torpedo or drone
+      const T = this.torps[f.id];
+      if (T) { this.explode(T.m.position, 1.2); T.dead = true; }
     } else if (f.type === 'rail') {
       const mz = this.exterior.userData.railMuzzle; if (!mz) return;
-      const s = this.sprite(0xbfe0ff, 9); s.position.copy(mz.position); s.userData.life = 0.35; s.userData.t = 0;
+      const s = this.sprite(0xbfe0ff, 9, 0.35); s.position.copy(mz.position);
       for (let i = 0; i < 6; i++) this.addTracer(mz.position.clone(), new THREE.Vector3(0, 0, -1), 4000, 30, 0.6, [0.7, 0.85, 1]);
     } else if (f.type === 'launch') {
-      const L = this.comps.launcher; if (!L) return;
       this.onFx({ type: 'srm', n: 1, dir: f.dir });
+    } else if (f.type === 'hit' && this.lastThreatPos) {
+      this.explode(this.lastThreatPos, 0.8); this.lastThreatPos = null;
     }
   }
   addTracer(p, dir, speed, len, life, col) {
     if (this.tracers.length >= this.trMax) this.tracers.shift();
     this.tracers.push({ p, d: dir, s: speed, len, life, t: 0, col });
   }
+  updateThreats(S, dt, now) {
+    const E = S.enc, seen = new Set();
+    const list = [];
+    if (E) {
+      for (const pr of E.proj) if (pr.from === 'them' && pr.type === 'missile' && pr.range < 64) list.push(pr);
+      for (const e of E.enemies) if (!e.dead && !e.gone && e.type === 'drone' && e.range < 64) list.push(e);
+    }
+    for (const t of list) {
+      seen.add(t.id);
+      let T = this.torps[t.id];
+      if (!T) {
+        const m = new THREE.Group();
+        if (t.type === 'drone') { m.add(new THREE.Mesh(new THREE.BoxGeometry(3, 2, 5), mat(0x6a6f76))); }
+        else {
+          const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 5, 12), mat(0x3a3e44)); body.rotation.x = Math.PI / 2; m.add(body);
+          const nose = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 12), mat(0xb8342a)); nose.rotation.x = -Math.PI / 2; nose.position.z = -3.2; m.add(nose);
+        }
+        const plume = new THREE.Sprite(this.flashMat.clone()); plume.material.color.setHex(0xff9a50); plume.position.z = 3.6; plume.scale.setScalar(9); m.add(plume);
+        m.userData.plume = plume; this.spaceFx.add(m);
+        T = this.torps[t.id] = { m };
+      }
+      this.threatPos(S, t, T.m.position);
+      T.m.lookAt(this.spaceFx.localToWorld(new THREE.Vector3(0, 0, -40)));
+      T.m.userData.plume.scale.setScalar(8 + Math.random() * 4);
+      if (Math.random() < 0.7) this.addTracer(T.m.position.clone(), T.m.position.clone().sub(new THREE.Vector3(0, 0, -40)).normalize(), 3, 20, 2.0, [0.5, 0.45, 0.4]);
+      if (t.range < 5) this.lastThreatPos = T.m.position.clone();
+    }
+    for (const id in this.torps) if (!seen.has(id)) { this.spaceFx.remove(this.torps[id].m); delete this.torps[id]; }
+  }
   updateExterior(S, now, dt) {
     this._S = S;
     const ex = this.exterior;
-    if (!ex.visible && !this.camActive) return;
-    // centrifuge ring
     if (ex.userData.ring) ex.userData.ring.rotation.z = S.ring ? S.ring.spin : 0;
     const hf = Math.min(1, S.heat.stored / 30000);
     for (const id of ['radA', 'radB']) {
@@ -546,32 +609,36 @@ export class World {
       w.scale.y += (target - w.scale.y) * Math.min(1, dt * 0.8);
       w.userData.mat.emissive.setRGB(0.35 * hf * hf, 0.1 * hf * hf, 0.02 * hf);
     }
-    // gatlings: track the threat, spin up, fire tracers in long streams
-    const fire = (S.weap && S.weap.pdcFire) || [0, 0, 0];
+    this.updateThreats(S, dt, now);
+    // gatlings: each tracks its own target (a torpedo or drone it can see), spins up and fires tracer streams at it
+    const W = S.weap || {}, fire = W.pdcFire || [0, 0, 0], tg = W.pdcTgt || [null, null, null];
     ['pdc1', 'pdc2', 'pdc3'].forEach((id, i) => {
       const v = this.comps[id]; if (!v || !v.gat) return;
       const G = v.gat, alive = S.comps[id].hp > 0;
-      let aim = this.pdcDir || null;
-      if (!aim && S.enc) { const e = S.enc.enemies.find((x) => !x.dead && !x.gone); if (e) aim = this.bodyDir(S, e.dir); }
-      if (alive && aim) {
-        const inv = v.group.quaternion.clone().invert(), la = aim.clone().applyQuaternion(inv);
-        const yawT = Math.atan2(-la.x, -la.z), pitchT = Math.atan2(la.y, Math.hypot(la.x, la.z));
-        G.yaw.rotation.y += (yawT - G.yaw.rotation.y) * Math.min(1, dt * 3);
-        G.pitch.rotation.x += (Math.max(-0.2, pitchT) - G.pitch.rotation.x) * Math.min(1, dt * 3);
-      } else if (!S.enc) { G.yaw.rotation.y *= 1 - Math.min(1, dt * 0.5); G.pitch.rotation.x *= 1 - Math.min(1, dt * 0.5); }
+      const mp = new THREE.Vector3(); G.flash.getWorldPosition(mp); ex.worldToLocal(mp);
+      let aim = null;
+      const T = tg[i] && this.torps[tg[i]];
+      if (T) aim = T.m.position.clone().sub(mp).normalize();
+      else if (S.enc) { const e = S.enc.enemies.find((x) => !x.dead && !x.gone); if (e) aim = this.bodyDir(S, e.dir); }
+      if (alive) {
+        let yawT, pitchT;
+        if (aim) { const la = aim.clone().applyQuaternion(v.group.quaternion.clone().invert()); yawT = Math.atan2(-la.x, -la.z); pitchT = Math.max(-0.12, Math.atan2(la.y, Math.hypot(la.x, la.z))); }
+        else { yawT = Math.sin(now * 0.15 + i * 2.1) * 1.4; pitchT = 0.35 + Math.sin(now * 0.11 + i) * 0.25; } // idle search sweep
+        let dy = yawT - G.yaw.rotation.y; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+        const k = Math.min(1, dt * (T ? 6 : 2));
+        G.yaw.rotation.y += dy * k; G.pitch.rotation.x += (pitchT - G.pitch.rotation.x) * k;
+      }
       const firing = alive && fire[i] > 0;
-      G.spin = (G.spin || 0) + ((firing ? 60 : 0) - (G.spin || 0)) * Math.min(1, dt * (firing ? 6 : 1.5));
+      G.spin = (G.spin || 0) + ((firing ? 55 : 0) - (G.spin || 0)) * Math.min(1, dt * (firing ? 5 : 1.2));
       G.barrels.rotation.z += G.spin * dt;
-      G.flash.visible = firing && Math.random() < 0.7;
-      if (G.flash.visible) G.flash.scale.setScalar(1.1 + Math.random() * 0.8);
+      G.flash.visible = firing && Math.random() < 0.75;
+      if (G.flash.visible) G.flash.scale.setScalar(1.2 + Math.random() * 1.0);
       if (firing) {
-        const n = Math.min(12, Math.max(1, Math.round(dt * 70)));
-        const mp = new THREE.Vector3(); G.flash.getWorldPosition(mp); ex.worldToLocal(mp);
         const bd = new THREE.Vector3(0, 0, -1).applyQuaternion(G.barrels.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(ex.quaternion.clone().invert());
-        for (let k = 0; k < n; k++) { const d = bd.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.04)).normalize(); this.addTracer(mp.clone(), d, 420 + Math.random() * 60, 22, 1.6, Math.random() < 0.25 ? [1, 0.35, 0.2] : [1, 0.85, 0.45]); }
+        const n = Math.min(10, Math.max(1, Math.round(dt * 60)));
+        for (let k2 = 0; k2 < n; k2++) { const d = bd.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.03, (Math.random() - 0.5) * 0.03, (Math.random() - 0.5) * 0.03)).normalize(); this.addTracer(mp.clone().addScaledVector(d, Math.random() * 3), d, 380 + Math.random() * 60, 24, 2.2, k2 % 4 === 0 ? [1, 0.35, 0.2] : [1, 0.85, 0.45]); }
       }
     });
-    if (!fire.some((x) => x > 0)) this.pdcDir = null;
     // launcher lids open briefly when a cell fires
     const L = this.comps.launcher;
     if (L && L.lids) for (const h of L.lids) { const o = h.userData.open || 0; h.userData.open = Math.max(0, o - dt); const tgt = o > 0 ? 1.9 : 0; h.rotation.z += (tgt * h.userData.side - h.rotation.z) * Math.min(1, dt * 8); }
@@ -586,8 +653,8 @@ export class World {
       m.m.children[0].scale.setScalar(1.6 + Math.random() * 0.8);
       if (Math.random() < 0.6) this.addTracer(m.m.position.clone(), m.v.clone().normalize().negate(), 5, 3, 1.2, [0.9, 0.9, 0.95]);
     }
-    this.missiles = this.missiles.filter((m) => { if (m.t > 5) { ex.remove(m.m); m.m.geometry.dispose(); return false; } return true; });
-    // tracers buffer
+    this.missiles = this.missiles.filter((m) => { if (m.t > 5) { this.spaceFx.remove(m.m); m.m.geometry.dispose(); return false; } return true; });
+    // tracer buffers
     const pos = this.tracerMesh.geometry.attributes.position.array, col = this.tracerMesh.geometry.attributes.color.array;
     const hpos = this.tracerHeads.geometry.attributes.position.array, hcol = this.tracerHeads.geometry.attributes.color.array;
     let n = 0;
@@ -597,15 +664,15 @@ export class World {
       const head = t.p.clone().addScaledVector(t.d, t.s * t.t), tail = head.clone().addScaledVector(t.d, -Math.min(t.len, t.s * t.t));
       const a = 1 - t.t / t.life;
       pos.set([head.x, head.y, head.z, tail.x, tail.y, tail.z], n * 6);
-      hpos.set([head.x, head.y, head.z], n * 3); hcol.set([t.col[0] * a, t.col[1] * a, t.col[2] * a], n * 3);
       col.set([t.col[0] * a, t.col[1] * a, t.col[2] * a, t.col[0] * a * 0.2, t.col[1] * a * 0.2, t.col[2] * a * 0.2], n * 6);
+      hpos.set([head.x, head.y, head.z], n * 3); hcol.set([t.col[0] * a, t.col[1] * a, t.col[2] * a], n * 3);
       n++;
     }
     this.tracers = this.tracers.filter((t) => t.t <= t.life);
     this.tracerMesh.geometry.setDrawRange(0, n * 2);
     this.tracerMesh.geometry.attributes.position.needsUpdate = true; this.tracerMesh.geometry.attributes.color.needsUpdate = true;
     this.tracerHeads.geometry.setDrawRange(0, n); this.tracerHeads.geometry.attributes.position.needsUpdate = true; this.tracerHeads.geometry.attributes.color.needsUpdate = true;
-    for (const s of this.sprites) if (s.visible) { s.userData.t = (s.userData.t || 0) + dt; s.material.opacity = Math.max(0, 1 - s.userData.t / (s.userData.life || 0.3)); if (s.userData.t > (s.userData.life || 0.3)) s.visible = false; }
+    for (const s of this.sprites) if (s.visible) { s.userData.t += dt; const k = s.userData.t / s.userData.life; s.material.opacity = Math.max(0, 1 - k); s.scale.setScalar(s.userData.s0 * (0.6 + k * 0.9)); if (k >= 1) s.visible = false; }
     // spinning kit, the plume, nav lights
     const combat = !!S.enc;
     if (this.comps.antenna && this.comps.antenna.spin) this.comps.antenna.spin.rotation.y = Math.sin(now * 0.05) * 0.4;
@@ -629,7 +696,6 @@ export class World {
     cam.fov = C.fov; cam.aspect = w / h; cam.updateProjectionMatrix();
     cam.position.set(...C.pos).add(ex.position);
     cam.lookAt(new THREE.Vector3(...C.look).add(ex.position));
-    cam.position.add(new THREE.Vector3((Math.random() - 0.5) * 0.004, (Math.random() - 0.5) * 0.004, 0));
     // swap in exterior lighting and visibility, render a small viewport, copy it out, restore
     const vis = this.decks.map((g) => g.visible); this.decks.forEach((g) => (g.visible = g === ex));
     const L = [this.point.intensity, this.point2.intensity, this.key.intensity, this.hemi.intensity, this.scene.environmentIntensity, this.sunlight.intensity];
@@ -638,7 +704,8 @@ export class World {
     this.sunlight.position.set(ex.position.x - 70, ex.position.y + 80, ex.position.z + 45 - 30); this.sunlight.target.position.set(ex.position.x, ex.position.y, ex.position.z - 30);
     const tv = this.tether.visible; this.tether.visible = false;
     const hv = this.hand.visible; this.hand.visible = false;
-    this.camActive = true; this.updateExterior(S, now, 0); this.camActive = false;
+    const fp = this.spaceFx.position.clone(), fq = this.spaceFx.quaternion.clone();
+    this.placeSpaceFx(EXT_DECK, S, true);
     this.placeSky(cam.position, now);
     const r = this.renderer, size = r.getSize(new THREE.Vector2()), pr = r.getPixelRatio();
     const vw = Math.min(size.x, w / pr), vh = Math.min(size.y, h / pr);
@@ -651,7 +718,8 @@ export class World {
     [this.point.intensity, this.point2.intensity, this.key.intensity, this.hemi.intensity, this.scene.environmentIntensity, this.sunlight.intensity] = L;
     this.sunlight.position.copy(sp); this.sunlight.target.position.copy(st);
     this.tether.visible = tv; this.hand.visible = hv;
-    this.placeSky(this.camera.position, now);
+    this.spaceFx.position.copy(fp); this.spaceFx.quaternion.copy(fq);
+    this.placeSky(this.camera.position, now, this.camDeck === RING_DECK && S.ring ? S.ring.spin : null);
     return C;
   }
 

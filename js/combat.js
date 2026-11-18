@@ -3,6 +3,7 @@ import { COMPS, COMP_IDS, DECKS, ROOM_R } from './config.js';
 import { clamp, rand, randi, chance, pick, weightedPick, polar, compPos, log, fx, startVote } from './util.js';
 import { eff, igniteComp, compsOnDeck, PDCS } from './sim.js';
 import { randDir, vnorm, cross, nose, angDeg, kick, qmul, qnorm, qconj, qrot, vlen, dot } from './attitude.js';
+import { pdcCanSee } from './hull.js';
 
 export const ENEMY_TYPES = {
   corvette: { name: 'Pirate corvette', hp: 80, missiles: 6, rail: true, railCd: [30, 45], slugs: 8, pdc: 2, evade: 0.18, pref: 700, accel: 0.02, loot: 1, hail: true },
@@ -120,26 +121,65 @@ export function addBreach(S, deck, a, size) {
   log(S, `HULL BREACH on ${DECKS[deck].name} deck — decompression!`, 'bad');
 }
 
+// Direction (ship frame) from which an incoming torpedo or kamikaze drone is closing. Torpedoes curve in on their own
+// paths, offset from their launcher's bearing, so a salvo arrives from several directions at once.
+export function projBodyDir(S, pr) {
+  const q = qconj(S.att.q || [0, 0, 0, 1]);
+  if (ENEMY_TYPES[pr.type]) return vnorm(qrot(q, pr.dir)); // a drone itself
+  const e = S.enc && S.enc.enemies.find((x) => x.id === pr.src);
+  const base = vnorm(qrot(q, e ? e.dir : pr.dir0 || [0, 1, 0]));
+  const a = vnorm(cross(base, Math.abs(base[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), b = cross(base, a), o = pr.off || [0, 0];
+  return vnorm([base[0] + (a[0] * o[0] + b[0] * o[1]) * 0.55, base[1] + (a[1] * o[0] + b[1] * o[1]) * 0.55, base[2] + (a[2] * o[0] + b[2] * o[1]) * 0.55]);
+}
+const PDC_RANGE = 60; // km at which the gatlings open up on an inbound torpedo or drone
+// Each gatling picks its own target: a torpedo the gunner has flagged (manual mode), otherwise the closest threat in its
+// arc. A turret only fires on what it can actually see from its mount (no shooting through the hull).
+function updatePDC(S, dt) {
+  const W = S.weap, E = S.enc;
+  if (!W.pdcFire) W.pdcFire = [0, 0, 0];
+  if (!W.pdcTgt) W.pdcTgt = [null, null, null];
+  W.pdcSndT = Math.max(0, (W.pdcSndT || 0) - dt);
+  const threats = [];
+  if (E && W.pdcMode !== 'off') {
+    for (const pr of E.proj) if (pr.from === 'them' && pr.type === 'missile' && !pr.done && pr.range < PDC_RANGE) threats.push(pr);
+    for (const e of E.enemies) if (!e.dead && !e.gone && ENEMY_TYPES[e.type].kamikaze && e.range < PDC_RANGE) threats.push(e);
+  }
+  let firing = 0;
+  PDCS.forEach((id, i) => {
+    W.pdcTgt[i] = null;
+    if (!threats.length || eff(S, id) <= 0 || S.stores.pdcAmmo < 100) return;
+    let best = null, bestScore = 1e9;
+    for (const t of threats) {
+      if (!pdcCanSee(id, projBodyDir(S, t))) continue;
+      const score = t.range - (W.focus.includes(t.id) ? 1000 : 0);
+      if (score < bestScore) { bestScore = score; best = t; }
+    }
+    if (!best) return;
+    W.pdcTgt[i] = best.id; W.pdcFire[i] = Math.max(W.pdcFire[i], 0.35);
+    S.stores.pdcAmmo = Math.max(0, S.stores.pdcAmmo - 66 * dt * eff(S, id));
+    S.heat.stored += 6 * dt;
+    firing++;
+  });
+  if (firing && W.pdcSndT <= 0) { W.pdcSndT = 1.25; fx(S, 'pdc', { n: firing }); }
+}
+// Resolves whether the gatlings kill a threat as it crosses the inner kill zone. Only turrets that can see it count.
 function pdcIntercept(S, pr, base) {
   const W = S.weap;
   if (W.pdcMode === 'off') return false;
   const focused = W.focus.includes(pr.id);
+  const d = projBodyDir(S, pr);
   let pSurvive = 1, engaged = 0;
-  const src = S.enc && S.enc.enemies.find((e) => e.id === (pr.src || pr.id));
-  const dir = pr.dir || (src ? src.dir : null);
-  if (!W.pdcFire) W.pdcFire = [0, 0, 0];
   for (const id of PDCS) {
     const e = eff(S, id);
-    if (e <= 0 || S.stores.pdcAmmo < 100) continue;
-    W.pdcFire[PDCS.indexOf(id)] = 1.4; // seconds of gatling fire (drives the barrel spin and tracers)
+    if (e <= 0 || S.stores.pdcAmmo < 100 || !pdcCanSee(id, d)) continue;
     const pk = W.pdcMode === 'auto' ? base : focused ? base * 1.6 : base * 0.3;
     pSurvive *= 1 - clamp(pk * e, 0, 0.95);
-    S.stores.pdcAmmo = Math.max(0, S.stores.pdcAmmo - 120);
-    S.heat.stored += 15;
     engaged++;
   }
-  if (engaged) fx(S, 'pdc', { dir, n: engaged });
-  return engaged > 0 && !chance(pSurvive);
+  const killed = engaged > 0 && !chance(pSurvive);
+  if (killed) fx(S, 'pkill', { id: pr.id });
+  else if (!engaged) log(S, 'No gatling could bear on an inbound threat — roll the ship to bring the guns round!', 'warn');
+  return killed;
 }
 
 export function updateWeapons(S, dt) {
@@ -166,6 +206,7 @@ export function updateWeapons(S, dt) {
 }
 
 export function updateCombat(S, dt) {
+  updatePDC(S, dt);
   const E = S.enc;
   if (!E) return;
   E.t += dt;
@@ -211,7 +252,7 @@ export function updateCombat(S, dt) {
     e.missileCd -= dt;
     if (e.missiles > 0 && e.missileCd <= 0 && e.range < 4000 && !e.fleeing) {
       const n = Math.min(e.missiles, 1 + randi(0, E.pts > 150 ? 2 : 1));
-      for (let i = 0; i < n; i++) E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'them', src: e.id, range: e.range, speed: 10, dmg: 30, off: [rand(-1, 1), rand(-1, 1)] });
+      for (let i = 0; i < n; i++) E.proj.push({ id: 'p' + (++_pid), type: 'missile', from: 'them', src: e.id, dir0: e.dir.slice(), range: e.range, speed: 10, dmg: 30, off: [rand(-1, 1), rand(-1, 1)] });
       fx(S, 'efire', { id: e.id, w: 'missile' });
       e.missiles -= n; e.missileCd = rand(20, 32);
       log(S, `${e.name} launched ${n} torpedo${n > 1 ? 'es' : ''}!`, 'bad');
