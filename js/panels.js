@@ -766,6 +766,26 @@ function drawAttitude(g, S, w, h) {
   const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone);
   if (t) { const a = angDeg(n, t.dir); g.fillStyle = a <= RAIL_CONE ? '#ffd23f' : '#ff3b2f'; g.fillText(a <= RAIL_CONE ? `RAIL SOLUTION ON ${t.name.split(' “')[0].toUpperCase()}` : `TARGET ${a.toFixed(1)}° OFF NOSE`, 250, 176); }
   if (S.nav.state === 'approach' && S.prox) { g.fillStyle = '#9dff7a'; g.fillText(`PORT ${Math.max(0, S.prox.p[2]).toFixed(1)} m · ${(-S.prox.v[2]).toFixed(2)} m/s`, 250, 196); }
+  drawRadAlign(g, S, 518, 190);
+}
+// Radiator alignment: an end-on view looking forward along the spine. The wings lie in the ship's Y–Z plane, so they
+// show as a vertical bar; the Sun dot should sit on that bar (edge-on), never off to the side (face-on).
+function drawRadAlign(g, S, cx, cy) {
+  if (!S.att.sunDir) return;
+  const sd = sunBody(S).dir, face = (Math.asin(Math.min(1, Math.abs(sd[0]))) * 180) / Math.PI;
+  const loss = Math.round((1 - radiatorSunFactor(S)) * 100), ext = S.heat.radExt;
+  const col = !ext ? '#7a4a20' : face < 10 ? '#9dff7a' : face < 35 ? '#ffd23f' : '#ff3b2f', r = 24;
+  g.strokeStyle = '#3a1a04'; g.lineWidth = 1; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke();
+  g.fillStyle = 'rgba(157,255,122,0.10)'; g.beginPath(); // the edge-on band: ±10° either side of the wing plane
+  for (const s0 of [-1, 1]) { g.moveTo(cx, cy); g.arc(cx, cy, r, -Math.PI / 2 * s0 - 0.1745, -Math.PI / 2 * s0 + 0.1745); g.lineTo(cx, cy); }
+  g.fill();
+  g.strokeStyle = ext ? '#ffc27a' : '#7a4a20'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx, cy - (ext ? r - 4 : 8)); g.lineTo(cx, cy + (ext ? r - 4 : 8)); g.stroke();
+  g.fillStyle = '#a8581a'; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
+  const pl = Math.hypot(sd[0], sd[1]);
+  if (pl > 0.05) { const x = cx + (sd[0] / pl) * r, y = cy - (sd[1] / pl) * r; g.fillStyle = '#ffe070'; g.beginPath(); g.arc(x, y, 3.5, 0, 7); g.fill(); g.strokeStyle = '#ffe070'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(cx + (x - cx) * 0.55, cy + (y - cy) * 0.55); g.stroke(); }
+  g.font = '9px monospace'; g.textAlign = 'center'; g.fillStyle = '#a8581a'; g.fillText('RADIATORS', cx, cy - r - 4);
+  g.fillStyle = col; g.fillText(!ext ? 'STOWED' : face < 10 ? 'EDGE-ON' : `${face.toFixed(0)}° −${loss}%`, cx, cy + r + 10);
+  g.textAlign = 'left';
 }
 function contactList(S) {
   const E = S.enc;
