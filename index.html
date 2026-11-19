@@ -60,6 +60,13 @@
         <button id="btn-import" class="btn">Load save file…</button>
         <input type="file" id="file-import" accept=".json,application/json" style="display:none">
         <div id="lobby-msg"></div>
+        <details class="relaybox mp"><summary>Connection settings (if joining times out)</summary>
+          <div class="desc">You don't need to be on the same network. But some routers, mobile networks and office or school Wi-Fi block direct peer-to-peer links, and then the connection needs a <b>TURN relay</b>. Get a free one (e.g. metered.ca → Open Relay, 20 GB/month) and paste it here. One side having it is usually enough, and both is safest.</div>
+          <label>TURN URL(s) <input id="relay-url" placeholder="turn:global.relay.metered.ca:443?transport=tcp" autocomplete="off"></label>
+          <label>Username <input id="relay-user" autocomplete="off"></label>
+          <label>Password <input id="relay-pass" type="password" autocomplete="off"></label>
+          <div id="relay-state" class="desc"></div>
+        </details>
         <div class="desc artnote">Solo debug build. Multiplayer (join by code) runs on the GitHub Pages version. Press <kbd>`</kbd> in game for the debug panel.</div>
         <div class="desc mp">The host's browser runs the ship simulation. Share the 5-character code with up to 4 crewmates. Peer-to-peer via WebRTC, no server needed.</div>
       </div>

@@ -96,6 +96,13 @@ function initLobby() {
   };
   $('#btn-host').onclick = () => { G.sfx.unlock(); startHost('host', who(), createState(settings())); };
   $('#btn-continue').onclick = () => { G.sfx.unlock(); const s = JSON.parse(store.get(SAVE_KEY)); startHost(ART ? 'solo' : 'host', who(), s); };
+  {
+    const rc = (() => { try { return JSON.parse(localStorage.getItem('wolfram-relay') || 'null') || {}; } catch (e) { return {}; } })();
+    $('#relay-url').value = rc.url || ''; $('#relay-user').value = rc.user || ''; $('#relay-pass').value = rc.pass || '';
+    const save = () => { const v = { url: $('#relay-url').value.trim(), user: $('#relay-user').value.trim(), pass: $('#relay-pass').value }; try { if (v.url) localStorage.setItem('wolfram-relay', JSON.stringify(v)); else localStorage.removeItem('wolfram-relay'); } catch (e) {} $('#relay-state').textContent = v.url ? 'Relay saved: used for hosting and joining.' : 'No relay: direct connections and the public PeerJS relay only.'; };
+    for (const id of ['#relay-url', '#relay-user', '#relay-pass']) $(id).addEventListener('change', save);
+    save();
+  }
   $('#btn-join').onclick = () => { G.sfx.unlock(); const code = $('#opt-code').value.trim().toUpperCase(); if (code.length < 4) return lobbyMsg('Enter the 5-character join code from the host.'); startClient(code, who()); };
   $('#opt-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
   $('#btn-import').onclick = () => $('#file-import').click();
@@ -162,6 +169,7 @@ function startHost(role, who, S) {
     lobbyMsg('Opening a channel…');
     const net = (G.net = new HostNet(G.code, {
       onReady: () => { lobbyMsg(''); enterGame(); G.hud.toast(`Join code: ${G.code}`, 'good'); },
+      onStatus: (t, k) => { if (G.hud) G.hud.toast(t, k || 'warn'); },
       onError: (e) => {
         if (e === 'code-taken') { net.close(); startHost(role, who, S); return; }
         if (!G.world) lobbyMsg('Could not open multiplayer channel: ' + e + '. You can still play solo.');
@@ -202,7 +210,15 @@ function startClient(code, who) {
     onOpen: () => { G.net.send({ t: 'hello', name: who.name, color: who.color }); lobbyMsg('Connected. Boarding…'); },
     onMsg: clientOnMsg,
     onClose: () => { if (G.world && !G.ended) showEnd('Connection lost', 'The host left or the connection dropped. The host can save and re-open the game with a new code.'); },
-    onError: (e) => { lobbyMsg(e === 'no-such-game' ? `No game found with code ${code}.` : e === 'timeout' ? 'Connection timed out. Check the code, or your network may block peer-to-peer connections.' : 'Network error: ' + e); },
+    onStatus: (t) => lobbyMsg(t),
+    onError: (e) => {
+      const relay = ' Fix: open Connection settings below and add a TURN relay (free: sign up at metered.ca → Open Relay, then paste its URL, username and password). Both players can use the same relay.';
+      lobbyMsg(e === 'no-such-game' ? `No ship with code ${code} is open. Check the code, and that the host's game is still running (keep that tab in front).`
+        : e === 'timeout-broker' ? 'Could not reach the matchmaking broker (0.peerjs.com). This network may block it; try another network or a phone hotspot.'
+        : e === 'timeout-host' ? `Reached the broker, but ship ${code} didn't answer. Check the code, and that the host's tab is open and awake.`
+        : e === 'ice-failed' || e === 'timeout-ice' ? `Found the host, but your two networks block a direct connection and the public relay didn't help.${relay}`
+        : 'Network error: ' + e);
+    },
   }, NETMODE);
 }
 function clientOnMsg(m) {

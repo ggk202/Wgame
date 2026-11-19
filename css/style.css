@@ -403,3 +403,8 @@ body.touch #tut { top: calc(36px + env(safe-area-inset-top)); }
 #gfx-adv { margin: 6px 0; } #gfx-adv summary { cursor: pointer; padding: 6px 0; color: #9fc6e8; }
 #touchui.kbd #stick, #touchui.kbd #tbtns, #touchui.kbd #tvert { display: none !important; }
 #touchui.kbd #lookpad { left: 0 !important; width: 100% !important; }
+
+.relaybox { margin-top: 8px; font-size: 13px; }
+.relaybox summary { cursor: pointer; opacity: 0.8; }
+.relaybox label { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+.relaybox input { flex: 1; min-width: 0; }
