@@ -15,6 +15,7 @@ import { Sfx } from './audio.js';
 import { ExtView } from './extview.js';
 import { sasModes } from './attitude.js';
 import { Tutorial } from './tutorial.js';
+import { CombatSim } from './combatsim.js';
 import { RepairGame, fmtClock } from './minigame.js';
 import { Tablet } from './tablet.js';
 import { repairNeeds, missingParts, PARTS, MODULES, PROCS } from './repair.js';
@@ -36,7 +37,7 @@ const G = {
   focus: null, menuOpen: false, chatOpen: false, ended: false, lifting: false, statusHeld: false,
 };
 window.WOLFRAM = G; // for debugging from the console
-G.dbg = { input, openPanel: (...a) => openPanel(...a), closePanel: () => closePanel(), act: (...a) => act(...a), rideLift: (d) => rideLift(d), eva: (o) => cycleAirlock(o) };
+G.dbg = { input, openPanel: (...a) => openPanel(...a), closePanel: () => closePanel(), act: (...a) => act(...a), rideLift: (d) => rideLift(d), eva: (o) => cycleAirlock(o), sim: (pod) => simSim().show({ pod }) };
 
 // ---------------- lobby ----------------
 function initLobby() {
@@ -94,6 +95,7 @@ function initLobby() {
     S.tutorial = true; G.wantTutorial = true;
     startHost('solo', who(), S);
   };
+  $('#btn-combatsim').onclick = () => { G.sfx.unlock(); simSim().show({ pod: false }); };
   $('#btn-host').onclick = () => { G.sfx.unlock(); startHost('host', who(), createState(settings())); };
   $('#btn-continue').onclick = () => { G.sfx.unlock(); const s = JSON.parse(store.get(SAVE_KEY)); startHost(ART ? 'solo' : 'host', who(), s); };
   {
@@ -317,6 +319,15 @@ function meView() {
   if (!p) return null;
   return { ...p, x: G.ctl.x, y: G.ctl.y, z: G.ctl.z, deck: G.ctl.deck, yaw: G.ctl.yaw, pitch: G.ctl.pitch, moving: G.ctl.moving, fl: G.ctl.fl, tether: G.ctl.tether, tWraps: G.ctl.tWraps, tsnap: !!(G.ctl.teth && G.ctl.teth.snapped) && G.ctl.deck === EXT_DECK, teth: G.ctl.deck === EXT_DECK && G.ctl.tetherPoints() ? G.ctl.tetherPoints().map((q) => [q.x, q.y, q.z]) : null };
 }
+// the combat simulator (main-menu training, and the sim pod on the ring): one instance, made on first use
+function simSim() {
+  if (!G.csim) G.csim = new CombatSim({
+    sfx: G.sfx, touch: () => G.touchMode,
+    onFinish: (r) => { if (G.S && G.csim.pod) act('sim.done', r); },
+    onClose: () => { if (G.S && G.csim.pod) act('sim.pod', { on: false }); },
+  });
+  return G.csim;
+}
 function logLocal(text, kind = 'info') { if (G.hud) G.hud.addLog(text, kind); }
 
 function openPanel(kind, compId) {
@@ -425,7 +436,7 @@ function lockMouse() {
 function handleInteraction(dt) {
   const S = G.S, me = meView();
   if (!me) return;
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive' || (G.repair && G.repair.open) || (G.tablet && G.tablet.open);
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || me.state !== 'alive' || (G.repair && G.repair.open) || (G.tablet && G.tablet.open) || (G.csim && G.csim.open);
   if ((me.state === 'dead' || me.state === 'spectator') && G.touch) { // touch: USE cycles the ghost job, DROP the camera
     if (input.use) { input.use = false; onKey('v'); }
     if (input.drop) { input.drop = false; if (me.ghost === 'cams') onKey(']'); }
@@ -451,6 +462,7 @@ function handleInteraction(dt) {
       else if (f.kind === 'npc') openPanel('npc', f.id);
       else if (f.kind === 'stationexit') rideLift(4);
       else if (f.kind === 'kiosk') openPanel('nav', 'navcomp');
+      else if (f.kind === 'simpod') { simSim().show({ pod: true }); G.ctl.releaseLock(); act('sim.pod', { on: true }); }
       else if (f.kind === 'bunk') act('sleep', { bunk: f.id });
       else if (f.kind === 'pod') act('pod.board');
       else if (f.kind === 'anchor') { G.ctl.clipTo(f.idx); G.sfx.click && G.sfx.click(0.6, 0, 2500); G.hud.toast(`Tether clipped to ${f.label.replace('Tether point (', '').replace(')', '')}`, 'good'); }
@@ -535,7 +547,7 @@ function frame(tms) {
   const me = S.players[G.myId];
   // teleports (respawn) from the host
   if (me && me.tp !== G.lastTp) { G.lastTp = me.tp; G.ctl.setFrom(me); }
-  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || (G.repair && G.repair.open) || (G.tablet && G.tablet.open);
+  const blocked = G.panel.open || G.menuOpen || G.chatOpen || G.lifting || !!G.world.focus || (G.repair && G.repair.open) || (G.tablet && G.tablet.open) || (G.csim && G.csim.open);
   G.ctl.update(dt, S, me, blocked);
   if (G.role !== 'client') {
     if (me) { const tp = G.ctl.deck === EXT_DECK ? G.ctl.tetherPoints() : null; me.teth = tp ? tp.map((q) => [q.x, q.y, q.z]) : null; me.tsnap = !!(G.ctl.teth && G.ctl.teth.snapped) && G.ctl.deck === EXT_DECK; me.x = G.ctl.x; me.y = G.ctl.y; me.z = G.ctl.z; me.deck = G.ctl.deck; me.yaw = G.ctl.yaw; me.pitch = G.ctl.pitch; me.fl = G.ctl.fl; }

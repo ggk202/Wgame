@@ -107,6 +107,8 @@ export const AIRLOCK = { deck: 1, a: 110 };            // inner airlock door on 
 // R = floor radius (m), W = corridor width (along the ship axis), H = ceiling height. Spin gravity g = w^2 R.
 export const RING_DECK = 6;
 export const RING = { R: 25.5, W: 6.4, H: 4.2, maxG: 0.5, spokes: [0, 120, 240], bays: 6 };
+// the combat sim pod on the ring, beside the 240° spoke ladder (corridor coordinates: x across, z along)
+export const SIMPOD = { x: -(RING.W / 2 - 0.78), z: (4 / 6) * 2 * Math.PI * RING.R - 3.2, hx: 0.6, hz: 1.2 };
 export const STATION_DECK = 7; // the concourse of the station we are docked at
 export const atmoDeck = (d) => (d === RING_DECK ? 3 : d); // the ring shares the hub's (Habitation) atmosphere
 export const deckName = (d) => (d === EXT_DECK ? 'Exterior (EVA)' : d === RING_DECK ? 'Centrifuge ring' : d === STATION_DECK ? 'Station concourse' : (DECKS[d] ? DECKS[d].name : '?')); // lift gate faces south

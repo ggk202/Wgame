@@ -2,7 +2,7 @@
 // Decks are built for both thrust gravity (floors face the drive, so you walk on them under thrust) and
 // zero-g (handrails at waist and head height, ceiling grab bars, an open trunk you can float through).
 import * as THREE from 'three';
-import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, RAIL_H, AIRLOCK, RING, EXT_DECK } from './config.js';
+import { DECKS, COMPS, COMP_IDS, LOCKERS, LIFT_A, SHELTER, DECK_H, ROOM_R, ROOM_H, SHAFT_R, RAIL_H, AIRLOCK, RING, EXT_DECK, SIMPOD } from './config.js';
 import { polar } from './util.js';
 import { BUNKS } from './crew.js';
 import { PAL, mat, metal, emis, texMat, mliTex, rackTex, floorTex, grateTex, textSprite, planeLabel, buildComp, buildFire } from './models.js';
@@ -435,6 +435,39 @@ export function buildRingInterior() {
     for (let y = -H + 0.3; y < 3; y += 0.32) { const r = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.5, 6), M.rail); r.rotation.z = Math.PI / 2; r.position.set(0, y, -0.55); hatch.add(r); }
     for (const x of [-0.26, 0.26]) { const rl = new THREE.Mesh(new THREE.BoxGeometry(0.05, H + 3, 0.06), M.steel); rl.position.set(x, (3 - H) / 2, -0.55); hatch.add(rl); }
     const lab = textSprite('SPOKE LADDER ▲ HUB', { width: 1.3, size: 26, color: '#ffe6b0' }); lab.position.set(0, -0.6, 0.5); hatch.add(lab);
+  }
+  // the combat sim pod: a reclined couch in an open composite shell, stick and throttle grips, a wraparound display
+  { const pod = new THREE.Group(); ringPlace(pod, SIMPOD.x, 0, SIMPOD.z); g.add(pod);
+    const o = (geo, m, x, y, zz, rx = 0, ry = 0) => { const q = new THREE.Mesh(geo, m); q.position.set(x, y, zz); q.rotation.set(rx, ry, 0); pod.add(q); return q; };
+    const shellM = mat(0xd9dee4, { roughness: 0.45, side: THREE.DoubleSide }), baseM = metal(0x39434f), seatM = mat(0x22303e, { roughness: 0.85 }), padM = mat(0x2d5d7a, { roughness: 0.9 }), rimM = emis(0x3affb0, 1.1), gripM = mat(0x111418, { roughness: 0.6 });
+    o(new THREE.BoxGeometry(1.15, 0.22, 2.35), baseM, 0.05, 0.11, 0);
+    o(new THREE.BoxGeometry(1.0, 0.03, 2.2), mat(0x1a2a2a), 0.07, 0.235, 0);
+    const shell = o(new THREE.CylinderGeometry(0.64, 0.64, 2.15, 32, 1, true, Math.PI * 0.8, Math.PI * 1.2), shellM, 0, 0.88, 0, Math.PI / 2);
+    shell.castShadow = true;
+    for (const zz of [-1.075, 1.075]) o(new THREE.CircleGeometry(0.64, 32, Math.PI * 0.3, Math.PI * 1.4), shellM, 0, 0.88, zz);
+    o(new THREE.BoxGeometry(0.04, 0.04, 2.15), rimM, 0.38, 1.4, 0);
+    o(new THREE.BoxGeometry(0.05, 0.035, 2.2), rimM, 0.6, 0.24, 0);
+    // couch: seat pan, reclined back, headrest, leg rest
+    o(new THREE.BoxGeometry(0.52, 0.1, 0.6), seatM, 0.05, 0.52, 0.05);
+    o(new THREE.BoxGeometry(0.46, 0.05, 0.54), padM, 0.05, 0.585, 0.05);
+    o(new THREE.BoxGeometry(0.52, 0.85, 0.1), seatM, 0.05, 0.86, -0.42, -0.55);
+    o(new THREE.BoxGeometry(0.46, 0.78, 0.05), padM, 0.05, 0.87, -0.36, -0.55);
+    o(new THREE.BoxGeometry(0.3, 0.18, 0.1), padM, 0.05, 1.27, -0.66, -0.55);
+    o(new THREE.BoxGeometry(0.46, 0.08, 0.62), seatM, 0.05, 0.44, 0.66, 0.28);
+    o(new THREE.CylinderGeometry(0.06, 0.08, 0.3, 10), baseM, 0.05, 0.36, 0.05);
+    // side consoles with a stick and a throttle
+    for (const sx of [-0.3, 0.38]) { o(new THREE.BoxGeometry(0.1, 0.12, 0.42), baseM, sx, 0.62, 0.12); o(new THREE.CylinderGeometry(0.022, 0.026, 0.2, 8), gripM, sx, 0.78, 0.2); o(new THREE.SphereGeometry(0.04, 10, 8), sx < 0 ? gripM : mat(0xc03020), sx, 0.89, 0.2); }
+    // the display: a curved green hologram panel facing the couch
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const c = cv.getContext('2d');
+    c.fillStyle = '#021208'; c.fillRect(0, 0, 512, 256); c.strokeStyle = '#1d7a4a'; c.lineWidth = 1;
+    for (let r = 30; r < 240; r += 40) { c.beginPath(); c.ellipse(256, 150, r * 1.6, r * 0.5, 0, 0, 7); c.stroke(); }
+    c.strokeStyle = '#3affb0'; c.lineWidth = 3; c.beginPath(); c.moveTo(236, 150); c.lineTo(256, 95); c.lineTo(276, 150); c.closePath(); c.stroke();
+    c.fillStyle = '#ff5a3a'; for (const [x, y] of [[90, 110], [400, 90], [350, 190]]) { c.fillRect(x - 5, y - 5, 10, 10); }
+    c.fillStyle = '#7dffb0'; c.font = 'bold 30px monospace'; c.fillText('COMBAT SIMULATOR', 110, 40); c.font = '18px monospace'; c.fillText('READY · PRESS E', 180, 236);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = THREE.RepeatWrapping; tex.repeat.x = -1;
+    const scr = o(new THREE.CylinderGeometry(0.5, 0.5, 0.42, 20, 1, true, -0.75, 1.5), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), 0.05, 1.08, 0.55, 0, 0);
+    scr.rotation.set(0, Math.PI, 0); scr.scale.set(1, 1, 0.6); scr.userData.keep = true;
+    const lab = textSprite('COMBAT SIM POD', { width: 1.3, size: 26, color: '#bfffbe' }); lab.position.set(0.35, 1.75, 0); pod.add(lab);
   }
   // signage: the direction of spin, and what thrust will do in here
   for (let i = 0; i < 6; i++) { const s = textSprite('SPIN ⟶   ·   UNDER THRUST THE FLOOR TILTS TOWARD THE DRIVE', { width: 3.6, size: 24, color: '#bfffbe' }); ringPlace(s, 0, 2.6, (i / 6) * C + 7); g.add(s); }

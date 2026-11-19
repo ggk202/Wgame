@@ -243,6 +243,13 @@ export function applyAction(S, pid, a, args = {}) {
     case 'helm.depart':
       if (!at(S, p, ['helm', 'comms'])) return;
       if (!depart(S)) err('Cannot depart'); return;
+    case 'sim.pod': p.inSim = !!args.on; return;
+    case 'sim.done': {
+      if (S.sim) return;
+      p.simT = S.gameTime; p.simBest = Math.max(p.simBest || 0, +args.score || 0); p.inSim = false;
+      log(S, `${p.name} ran a combat sim in the pod: ${String(args.name || 'drill').slice(0, 30)} — ${args.win ? 'complete' : 'failed'}, score ${Math.round(+args.score || 0)}. Target locks +20% for them for 48 h.`, 'info');
+      return;
+    }
     case 'nav.owarp':
       if (!at(S, p, ['navcomp', 'helm'])) return;
       if (!S.orb) return;

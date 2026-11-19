@@ -21,6 +21,8 @@ function fromTo(a, b) { // quaternion rotating unit vector a onto b
   return qnorm([c[0], c[1], c[2], 1 + d]);
 }
 function nlerp(a, b, k) { const s = dot(a, b) + a[3] * b[3] < 0 ? -1 : 1; return qnorm([a[0] + (b[0] * s - a[0]) * k, a[1] + (b[1] * s - a[1]) * k, a[2] + (b[2] * s - a[2]) * k, a[3] + (b[3] * s - a[3]) * k]); }
+// a crewmate at Sensors or Fire Control who trained in the sim pod in the last 48 hours locks on faster
+const simTrained = (S) => Object.values(S.players).some((p) => (p.seat === 'sensors' || p.seat === 'tactical') && p.simT !== undefined && S.gameTime - p.simT < 48 * 3600);
 export function startEncounter(S, kind, pts) {
   pts = Math.max(40, pts);
   const enemies = [];
@@ -200,7 +202,7 @@ export function updateWeapons(S, dt) {
     else {
       const se = eff(S, 'sensors') * (0.3 + 0.7 * eff(S, 'sensorArray'));
       if (se <= 0) Sn.q = Math.max(0, Sn.q - 0.1 * dt);
-      else Sn.q = Math.min(1, Sn.q + 0.07 * se * dt * (S.scoutOut ? 1.4 : 1) * (S.effects.stormT > 0 ? 0.4 : 1) * clamp(2500 / tgt.range, 0.3, 1.5));
+      else Sn.q = Math.min(1, Sn.q + 0.07 * se * dt * (S.scoutOut ? 1.4 : 1) * (simTrained(S) ? 1.2 : 1) * (S.effects.stormT > 0 ? 0.4 : 1) * clamp(2500 / tgt.range, 0.3, 1.5));
     }
   }
 }

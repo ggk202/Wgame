@@ -169,6 +169,11 @@ Difficulty changes the work:
 - **Veteran:** no highlights, and mixed fastener sizes.
 - **Newtonian:** every screw and bolt can be a different size and drive, unmarked. The wrong bit chews a screw head, a bolt done out of star order pinches the gasket, and touching a live HV circuit shocks you.
 
+## Combat training
+
+- **Combat training** (main menu) opens the simulator: the ship's real combat model (sensors and locks, the spinal railgun, torpedoes, Kestrel missiles, point defence, evasive jinking and the damage model) runs on a private copy of the Wolfram. A holographic tactical view sits beside a combined helm and weapons console. The scenarios are target practice, a drone swarm, a pirate corvette, a pirate pack, a separatist gunship, a blockade, and the four-wave Gauntlet, each at Recruit, Spacer or Veteran difficulty. Runs are scored, and your best score per scenario is kept.
+- **The sim pod** on the centrifuge ring (beside the 240° spoke ladder) opens the same simulator during a voyage. It runs on your own machine while the real ship carries on. Finishing a session goes in the log and gives you 20% faster target locks at Sensors or Fire Control for 48 hours.
+
 ## Stations, routes and items
 
 - **Stations:** while docked, take the lift's STATION button to the concourse (0.38 g). Vendors sell parts, contractors offer quests (settled at the next dock), and lost & found items appear each leg.

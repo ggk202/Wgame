@@ -1,7 +1,7 @@
 // Local first-person controller, keyboard/mouse input and interaction targeting.
 import { ANCHORS, tetherSnag, tetherClear, tetherInRing, ringSDF, RING_STATE } from './hull.js';
 import { ST, ST_BOXES, ST_EXIT, stationNpcs } from './stationdata.js';
-import { STATION_DECK, WAYPOINTS } from './config.js';
+import { STATION_DECK, WAYPOINTS, SIMPOD } from './config.js';
 import { BUNKS, bunkPos, BUNK_REACH, podState, POD, POD_CRADLE, SCOUT } from './crew.js';
 import { COMPS, COMP_IDS, LOCKERS, LIFT_A, ROOM_R, ROOM_H, DECK_H, SHAFT_R, RAIL_H, EYE, PLAYER_H, ITEMS, DECKS, EXT_DECK, EXT, AIRLOCK, RING, RING_DECK, G0 } from './config.js';
 import { polar, compPos, compDeck, clamp } from './util.js';
@@ -298,6 +298,7 @@ export class Controller {
     const C = 2 * Math.PI * RING.R, hw = RING.W / 2 - 0.45;
     this.z = ((this.z % C) + C) % C;
     if (Math.abs(this.x) > hw) { this.x = Math.sign(this.x) * hw; this.vx = 0; }
+    { let dz = this.z - SIMPOD.z; if (dz > C / 2) dz -= C; if (dz < -C / 2) dz += C; const edge = SIMPOD.x + SIMPOD.hx + 0.25; if (Math.abs(dz) < SIMPOD.hz + 0.2 && this.x < edge && this.y < 1.6) { this.x = edge; this.vx = 0; } } // the sim pod
     const eye = this.y + EYE, bottom = walk ? this.y : eye - 0.35, top = walk ? this.y + PLAYER_H : eye + 0.25;
     if (bottom < 0) { if (this.vy < 0) this.land(-this.vy); this.y = walk ? 0 : 0.35 - EYE; this.vy = Math.max(0, this.vy); }
     if (top > RING.H) { this.y -= top - RING.H; this.vy = Math.min(0, this.vy); }
@@ -443,6 +444,7 @@ export class Controller {
       const C = 2 * Math.PI * RING.R;
       for (const a of RING.spokes) { let z = (a / 360) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'spoke', id: 'spoke', label: 'Spoke ladder to the hub' }, 0, 1.8, z, 4.6, 1.6); }
       for (let i = 0; i < RING.bays; i++) { let z = ((i + 0.5) / RING.bays) * C; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; for (const s of [-1, 1]) { const bid = 'bay' + (i * 2 + (s > 0 ? 1 : 0)), run = S.sci && S.sci.bays[bid]; consider({ kind: 'bay', id: bid, label: `Science Bay ${i * 2 + (s > 0 ? 2 : 1)}${run ? ' — ' + Math.round(run.p * 100) + '%' : ' (empty)'}` }, s * (RING.W / 2 - 0.4), 1.2, z, 2.4); } }
+      { let z = SIMPOD.z; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'simpod', id: 'simpod', label: 'Combat sim pod' }, SIMPOD.x + 0.4, 1.0, z, 3.3, 1.0); }
       for (const b of BUNKS) if (b.deck === RING_DECK) { let z = b.z; if (z - this.z > C / 2) z -= C; if (this.z - z > C / 2) z += C; consider({ kind: 'bunk', id: b.id, label: b.label }, b.x, 0.5, z, BUNK_REACH + 0.6, 0.9); }
       return best;
     }

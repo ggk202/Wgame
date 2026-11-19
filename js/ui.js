@@ -378,6 +378,7 @@ function promptFor(S, me, f, touch) {
   else if (f.kind === 'npc') parts.push(`<b>${f.label}</b>`, K('E', 'Talk'));
   else if (f.kind === 'stationexit') parts.push(`<b>${f.label}</b>`, K('E', 'Back aboard'));
   else if (f.kind === 'kiosk') parts.push(`<b>${f.label}</b>`, K('E', 'Routes & departures'));
+  else if (f.kind === 'simpod') parts.push(`<b>${f.label}</b>`, K('E', 'Climb in: combat training'));
   else if (f.kind === 'spoke') parts.push(`<b>${f.label}</b>`, K('E', 'Climb to the hub'));
   else if (f.kind === 'player') {
     const p = S.players[f.id];

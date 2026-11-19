@@ -284,25 +284,7 @@ export const PANELS = {
     title: 'SENSORS',
     build(B) {
       telescopeBlock(B);
-      B.canvas(400, 200, (g, S, w, h) => {
-        g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
-        const cx = w / 2, cy = h - 10, maxR = 4500, sc = (h - 20) / maxR;
-        g.strokeStyle = '#4a2208'; g.fillStyle = '#a0581a'; g.font = '9px monospace';
-        for (const r of [1000, 2000, 3000, 4000]) { g.beginPath(); g.arc(cx, cy, r * sc, Math.PI, 0); g.stroke(); g.fillText(r + ' km', cx + r * sc - 30, cy - 2); }
-        const E = S.enc;
-        if (!E) { g.fillStyle = '#ff8a1e'; g.fillText('No contacts. Passive IR watch.', 10, 16); return; }
-        const ang = (id) => { let h2 = 0; for (const ch of id) h2 = (h2 * 31 + ch.charCodeAt(0)) % 1000; return Math.PI * (0.15 + 0.7 * (h2 / 1000)); };
-        for (const e of E.enemies) {
-          if (e.dead || e.gone) continue;
-          const a = ang(e.id), r = Math.min(maxR, e.range) * sc;
-          const x = cx - Math.cos(a) * r, y = cy - Math.sin(a) * r;
-          g.fillStyle = S.sensors.lock === e.id ? '#ff3b2f' : '#ffb040';
-          g.beginPath(); g.arc(x, y, e.type === 'drone' ? 3 : 5, 0, 7); g.fill();
-          g.fillText(e.name.slice(0, 22), x + 7, y + 3);
-          for (const p of E.proj) if (p.src === e.id && p.from === 'them') { const rr = Math.min(maxR, p.range) * sc; g.fillStyle = p.type === 'missile' ? '#ff4040' : '#ffffff'; g.fillRect(cx - Math.cos(a) * rr - 1.5, cy - Math.sin(a) * rr - 1.5, 3, 3); }
-        }
-        g.fillStyle = '#ffd8a0'; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
-      });
+      B.canvas(400, 200, drawRadar);
       B.kv('Sensor suite / array', (S) => `${pct(eff(S, 'sensors'))} / ${pct(eff(S, 'sensorArray'))}${S.effects.stormT > 0 ? ' · STORM INTERFERENCE' : ''}`);
       B.bar('Target lock', (S) => ({ v: S.sensors.q, text: S.sensors.lock ? pct(S.sensors.q) : 'none', cls: S.sensors.q > 0.4 ? 'good' : 'warn' }));
       B.buttons([{ label: 'Active ping', labelFn: (S) => (S.sensors.pingCd > 0 ? `Active ping (${Math.ceil(S.sensors.pingCd)} s)` : 'Active ping (+35% lock)'), act: 'sensors.ping', enabled: (S) => S.sensors.pingCd <= 0 && !!S.enc }]);
@@ -317,34 +299,31 @@ export const PANELS = {
       telescopeBlock(B);
       B.kv('Target', (S) => { const e = S.enc && S.enc.enemies.find((x) => x.id === S.sensors.lock); return e ? { text: `${e.name} · ${e.range.toFixed(0)} km · lock ${pct(S.sensors.q)}`, cls: S.sensors.q > 0.4 ? 'good' : 'warn' } : { text: 'NO LOCK — select a contact below', cls: 'warn' }; });
       B.html((S) => contactList(S));
-      B.section('Railgun');
-      B.bar('Capacitor', (S) => ({ v: S.weap.rail, text: S.weap.rail >= 1 ? 'CHARGED' : pct(S.weap.rail) + (S.weap.charging ? ' charging (20 MW)' : ''), cls: S.weap.rail >= 1 ? 'good' : 'warn' }));
-      B.buttons([
-        { label: 'Charge', labelFn: (S) => (S.weap.charging ? 'Stop charging' : 'Charge capacitor'), act: 'tac.charge', args: () => ({ on: !B.ctx.S().weap.charging }) },
-        { label: 'FIRE RAILGUN', cls: 'red', act: 'tac.rail', labelFn: (S) => `FIRE RAILGUN (${S.stores.slugs} slugs)`, enabled: (S) => S.weap.rail >= 1 && !!S.enc },
-      ]);
-      B.section('Torpedoes');
-      B.kv('Tubes', (S) => S.weap.tubes.map((t, i) => `T${i + 1}: ${t.loaded ? 'LOADED' : t.load > 0 ? 'loading ' + pct(t.load) : 'empty'}`).join(' · '));
-      B.buttons([
-        { label: 'LAUNCH TORPEDO', cls: 'red', act: 'tac.torp', enabled: (S) => S.weap.tubes.some((t) => t.loaded) && !!S.enc },
-        { label: 'Deploy chaff', act: 'tac.chaff', labelFn: (S) => `Deploy chaff (${S.stores.chaff})`, enabled: (S) => !!S.enc && S.stores.chaff > 0 },
-      ]);
-      B.section('Missiles');
-      B.kv('Cells', (S) => ({ text: `${'▮'.repeat(S.weap.cells)}${'▯'.repeat(8 - S.weap.cells)}  ${S.weap.cells}/8 ready · ${S.stores.srm} in stock${S.weap.cells < 8 && S.stores.srm > 0 ? ` · reloading ${pct(S.weap.cellT / 18)}` : ''}`, cls: S.weap.cells ? 'good' : 'warn' }));
-      B.buttons([1, 2, 4].map((n) => ({ label: `SALVO ×${n}`, cls: 'red', act: 'tac.srm', args: () => ({ n }), enabled: (S) => !!S.enc && S.weap.cells >= n && eff(S, 'launcher') > 0 })));
-      B.note('Kestrels are small, fast and cheap: each hits for less than a torpedo, but salvoes swamp enemy point defence. The launcher reloads one cell every 18 s from stock (fabricate more at Cargo).');
-      B.section('Point defence');
-      B.seg('Mode', [{ v: 'auto', l: 'Auto' }, { v: 'manual', l: 'Manual' }, { v: 'off', l: 'Off' }], (S) => S.weap.pdcMode, 'tac.pdc', (v) => ({ mode: v }), (S, v) => v !== 'auto' || S.settings.autoPDC);
-      B.kv('Turrets / ammo', (S) => `${PDCS.map((id) => pct(eff(S, id))).join(' · ')} · ${S.stores.pdcAmmo} rds`);
-      B.html((S) => {
-        const E = S.enc;
-        if (!E) return '';
-        const inc = E.proj.filter((p) => p.from === 'them');
-        if (!inc.length) return '<div class="note">No incoming fire.</div>';
-        return '<table class="tbl"><tr><th>Incoming</th><th>Range</th><th>ETA</th><th></th></tr>' + inc.map((p) => `<tr><td class="${p.type === 'missile' ? 'bad' : 'warn'}">${p.type === 'missile' ? 'TORPEDO' + (p.chaffed ? ' (spoofed)' : '') : 'RAIL SLUG'}</td><td>${p.range.toFixed(0)} km</td><td>${Math.ceil(p.range / Math.max(1, p.speed))} s</td><td>${p.type === 'missile' && S.weap.pdcMode === 'manual' ? (S.weap.focus.includes(p.id) ? '<b class="good">ENGAGING</b>' : btn('ENGAGE', 'tac.focus', { id: p.id }, 'red')) : ''}</td></tr>`).join('') + '</table>';
-      });
-      B.note('Three 6-barrel gatlings: each burst is a wall of tracers. PDCs cannot stop railgun slugs, only torpedoes and drones. Slugs are dodged by evasive jinking at the helm. In manual mode, ENGAGE each torpedo for a much better kill chance.');
+      weaponSections(B);
       camBlock(B);
+    },
+  },
+
+  // the combat simulator (sim pod / main-menu training): helm, weapons and sensors on one console, no cameras
+  simconsole: {
+    title: 'COMBAT SIMULATOR',
+    build(B) {
+      B.kv('Target', (S) => { const e = S.enc && S.enc.enemies.find((x) => x.id === S.sensors.lock); return e ? { text: `${e.name} · ${e.range.toFixed(0)} km · lock ${pct(S.sensors.q)}`, cls: S.sensors.q > 0.4 ? 'good' : 'warn' } : { text: S.enc ? 'NO LOCK — select a contact below' : 'No contacts', cls: 'warn' }; });
+      B.html((S) => contactList(S));
+      B.section('Helm');
+      B.canvas(560, 230, drawAttitude);
+      B.seg('SAS', [{ v: 'off', l: 'Off' }, { v: 'hold', l: 'Hold' }, { v: 'pro', l: 'Prograde' }, { v: 'retro', l: 'Retro' }, { v: 'target', l: 'Target' }], (S) => S.att.mode, 'att.mode', (v) => ({ m: v }), (S, v) => sasModes(S).includes(v));
+      B.pad('Rotate (RCS)', [['▲ NOSE UP S', 'r', 0, 1], ['▼ NOSE DN W', 'r', 0, -1], ['◀ YAW A', 'r', 1, 1], ['YAW D ▶', 'r', 1, -1], ['⟲ ROLL Q', 'r', 2, 1], ['ROLL E ⟳', 'r', 2, -1]]);
+      B.canvas(560, 240, drawThreatCone);
+      B.toggle('Evasive jinking', (S) => S.drive.evasive, 'helm.evasive', (v) => ({ on: v }));
+      B.seg('Range', [{ v: 'hold', l: 'Hold' }, { v: 'open', l: 'Open range' }, { v: 'close', l: 'Close' }], (S) => S.drive.maneuver, 'helm.maneuver', (v) => ({ m: v }));
+      B.buttons([{ label: 'Ignite drive', act: 'helm.ignite', enabled: (S) => !S.drive.ignited }, { label: 'Cut drive', act: 'helm.cutoff', cls: 'red', enabled: (S) => S.drive.ignited }]);
+      B.note((S) => { const t = S.enc && S.enc.enemies.find((e) => e.id === S.sensors.lock && !e.dead && !e.gone); const aim = t ? angDeg(nose(S.att.q), t.dir) : null; return (t ? `<b>${aim <= RAIL_CONE ? 'RAIL SOLUTION' : 'Target ' + aim.toFixed(1) + '° off the nose'}</b> · ` : '') + 'Keys: <b>W/S</b> pitch · <b>A/D</b> yaw · <b>Q/E</b> roll · <b>X</b> kill rotation. Point the nose at the target for the railgun (SAS Target). Evasive jinking spoils enemy rail solutions; range control needs the drive lit.'; });
+      weaponSections(B);
+      B.section('Sensors');
+      B.canvas(400, 200, drawRadar);
+      B.bar('Target lock', (S) => ({ v: S.sensors.q, text: S.sensors.lock ? pct(S.sensors.q) : 'none', cls: S.sensors.q > 0.4 ? 'good' : 'warn' }));
+      B.buttons([{ label: 'Active ping', labelFn: (S) => (S.sensors.pingCd > 0 ? `Active ping (${Math.ceil(S.sensors.pingCd)} s)` : 'Active ping (+35% lock)'), act: 'sensors.ping', enabled: (S) => S.sensors.pingCd <= 0 && !!S.enc }]);
     },
   },
 
@@ -804,6 +783,54 @@ function drawRadAlign(g, S, cx, cy) {
   g.font = '9px monospace'; g.textAlign = 'center'; g.fillStyle = '#a8581a'; g.fillText('RADIATORS', cx, cy - r - 4);
   g.fillStyle = col; g.fillText(!ext ? 'STOWED' : face < 10 ? 'EDGE-ON' : `${face.toFixed(0)}° −${loss}%`, cx, cy + r + 10);
   g.textAlign = 'left';
+}
+function drawRadar(g, S, w, h) {
+        g.fillStyle = '#0b0500'; g.fillRect(0, 0, w, h);
+        const cx = w / 2, cy = h - 10, maxR = 4500, sc = (h - 20) / maxR;
+        g.strokeStyle = '#4a2208'; g.fillStyle = '#a0581a'; g.font = '9px monospace';
+        for (const r of [1000, 2000, 3000, 4000]) { g.beginPath(); g.arc(cx, cy, r * sc, Math.PI, 0); g.stroke(); g.fillText(r + ' km', cx + r * sc - 30, cy - 2); }
+        const E = S.enc;
+        if (!E) { g.fillStyle = '#ff8a1e'; g.fillText('No contacts. Passive IR watch.', 10, 16); return; }
+        const ang = (id) => { let h2 = 0; for (const ch of id) h2 = (h2 * 31 + ch.charCodeAt(0)) % 1000; return Math.PI * (0.15 + 0.7 * (h2 / 1000)); };
+        for (const e of E.enemies) {
+          if (e.dead || e.gone) continue;
+          const a = ang(e.id), r = Math.min(maxR, e.range) * sc;
+          const x = cx - Math.cos(a) * r, y = cy - Math.sin(a) * r;
+          g.fillStyle = S.sensors.lock === e.id ? '#ff3b2f' : '#ffb040';
+          g.beginPath(); g.arc(x, y, e.type === 'drone' ? 3 : 5, 0, 7); g.fill();
+          g.fillText(e.name.slice(0, 22), x + 7, y + 3);
+          for (const p of E.proj) if (p.src === e.id && p.from === 'them') { const rr = Math.min(maxR, p.range) * sc; g.fillStyle = p.type === 'missile' ? '#ff4040' : '#ffffff'; g.fillRect(cx - Math.cos(a) * rr - 1.5, cy - Math.sin(a) * rr - 1.5, 3, 3); }
+        }
+        g.fillStyle = '#ffd8a0'; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
+      }
+function weaponSections(B) {
+      B.section('Railgun');
+      B.bar('Capacitor', (S) => ({ v: S.weap.rail, text: S.weap.rail >= 1 ? 'CHARGED' : pct(S.weap.rail) + (S.weap.charging ? ' charging (20 MW)' : ''), cls: S.weap.rail >= 1 ? 'good' : 'warn' }));
+      B.buttons([
+        { label: 'Charge', labelFn: (S) => (S.weap.charging ? 'Stop charging' : 'Charge capacitor'), act: 'tac.charge', args: () => ({ on: !B.ctx.S().weap.charging }) },
+        { label: 'FIRE RAILGUN', cls: 'red', act: 'tac.rail', labelFn: (S) => `FIRE RAILGUN (${S.stores.slugs} slugs)`, enabled: (S) => S.weap.rail >= 1 && !!S.enc },
+      ]);
+      B.section('Torpedoes');
+      B.kv('Tubes', (S) => S.weap.tubes.map((t, i) => `T${i + 1}: ${t.loaded ? 'LOADED' : t.load > 0 ? 'loading ' + pct(t.load) : 'empty'}`).join(' · '));
+      B.buttons([
+        { label: 'LAUNCH TORPEDO', cls: 'red', act: 'tac.torp', enabled: (S) => S.weap.tubes.some((t) => t.loaded) && !!S.enc },
+        { label: 'Deploy chaff', act: 'tac.chaff', labelFn: (S) => `Deploy chaff (${S.stores.chaff})`, enabled: (S) => !!S.enc && S.stores.chaff > 0 },
+      ]);
+      B.section('Missiles');
+      B.kv('Cells', (S) => ({ text: `${'▮'.repeat(S.weap.cells)}${'▯'.repeat(8 - S.weap.cells)}  ${S.weap.cells}/8 ready · ${S.stores.srm} in stock${S.weap.cells < 8 && S.stores.srm > 0 ? ` · reloading ${pct(S.weap.cellT / 18)}` : ''}`, cls: S.weap.cells ? 'good' : 'warn' }));
+      B.buttons([1, 2, 4].map((n) => ({ label: `SALVO ×${n}`, cls: 'red', act: 'tac.srm', args: () => ({ n }), enabled: (S) => !!S.enc && S.weap.cells >= n && eff(S, 'launcher') > 0 })));
+      B.note('Kestrels are small, fast and cheap: each hits for less than a torpedo, but salvoes swamp enemy point defence. The launcher reloads one cell every 18 s from stock (fabricate more at Cargo).');
+      B.section('Point defence');
+      B.seg('Mode', [{ v: 'auto', l: 'Auto' }, { v: 'manual', l: 'Manual' }, { v: 'off', l: 'Off' }], (S) => S.weap.pdcMode, 'tac.pdc', (v) => ({ mode: v }), (S, v) => v !== 'auto' || S.settings.autoPDC);
+      B.kv('Turrets / ammo', (S) => `${PDCS.map((id) => pct(eff(S, id))).join(' · ')} · ${S.stores.pdcAmmo} rds`);
+      B.html((S) => {
+        const E = S.enc;
+        if (!E) return '';
+        const inc = E.proj.filter((p) => p.from === 'them');
+        if (!inc.length) return '<div class="note">No incoming fire.</div>';
+        return '<table class="tbl"><tr><th>Incoming</th><th>Range</th><th>ETA</th><th></th></tr>' + inc.map((p) => `<tr><td class="${p.type === 'missile' ? 'bad' : 'warn'}">${p.type === 'missile' ? 'TORPEDO' + (p.chaffed ? ' (spoofed)' : '') : 'RAIL SLUG'}</td><td>${p.range.toFixed(0)} km</td><td>${Math.ceil(p.range / Math.max(1, p.speed))} s</td><td>${p.type === 'missile' && S.weap.pdcMode === 'manual' ? (S.weap.focus.includes(p.id) ? '<b class="good">ENGAGING</b>' : btn('ENGAGE', 'tac.focus', { id: p.id }, 'red')) : ''}</td></tr>`).join('') + '</table>';
+      });
+      B.note('Three 6-barrel gatlings: each burst is a wall of tracers. PDCs cannot stop railgun slugs, only torpedoes and drones. Slugs are dodged by evasive jinking at the helm. In manual mode, ENGAGE each torpedo for a much better kill chance.');
 }
 function contactList(S) {
   const E = S.enc;
