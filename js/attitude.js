@@ -44,7 +44,10 @@ export function sasModes(S) {
   const s = S.settings.sas;
   if (s === 'none') return ['off'];
   if (s === 'hold') return ['off', 'hold'];
-  return (S.settings.style || S.settings.difficulty) === 'recruit' ? ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun', 'dock'] : ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun'];
+  const base = (S.settings.style || S.settings.difficulty) === 'recruit' ? ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun', 'dock'] : ['off', 'hold', 'pro', 'retro', 'target', 'shield', 'sun'];
+  // in a planet's gravity: radial and target-relative pointing for orbit changes and intercepts
+  if (S.orb && ['capture', 'orbit', 'depart'].includes(S.nav.state)) base.push('radout', 'radin', ...(S.orb.loc && S.orb.loc.tlos ? ['tret', 'tlos'] : []), ...(S.orb.loc && S.orb.loc.node ? ['node'] : []));
+  return base;
 }
 
 // Target direction (inertial) for a SAS pointing mode
@@ -54,6 +57,9 @@ function sasTarget(S) {
   if (m === 'retro') return [0, 0, 1];
   if (m === 'target' && S.enc) { const e = S.enc.enemies.find((x) => x.id === S.sensors.lock && !x.dead && !x.gone); if (e) return e.dir; }
   if (m === 'dock') return [0, 0, -1];
+  if (m === 'radout') return [0, 1, 0];
+  if (m === 'radin') return [0, -1, 0];
+  if ((m === 'tret' || m === 'tlos' || m === 'node') && S.orb && S.orb.loc) return S.orb.loc[m] || null;
   if (m === 'shield' && S.att.sunDir) return [-S.att.sunDir[0], -S.att.sunDir[1], -S.att.sunDir[2]]; // stern (shadow shield, tanks) to the Sun
   if (m === 'sun' && S.att.sunDir) return S.att.sunDir;
   return null;

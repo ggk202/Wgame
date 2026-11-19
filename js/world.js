@@ -1,6 +1,7 @@
 // Three.js scene: five stacked decks of the CSV Wolfram, the hull exterior, crew and effects.
 // Models and textures live in models.js (ISS-era, NASA-style look).
 import * as THREE from 'three';
+import { OB, DSkm, toLocal, objState } from './orbit.js';
 import { DECKS, COMPS, COMP_IDS, DECK_H, ROOM_R, ROOM_H, SHAFT_R, EYE, ITEMS, WAYPOINTS, EXT, EXT_DECK, RING, RING_DECK, G0 } from './config.js';
 import { polar, compDeck } from './util.js';
 import { mat, textSprite, buildComp, buildFire, buildAvatar } from './models.js';
@@ -456,7 +457,7 @@ export class World {
     this.dest.scale.set(ds, ds, 1);
     this.sun.position.set(cp.x - 2600, cp.y + 900, cp.z + 1500);
     let pk = null;
-    if (N.state === 'docked') pk = WAYPOINTS[N.leg].id;
+    if (N.state === 'docked' || N.state === 'depart') pk = WAYPOINTS[N.leg].id;
     else if (N.state !== 'transit') pk = WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
     else if (f < 0.03) pk = WAYPOINTS[N.leg].id;
     else if (f > 0.97) pk = WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
@@ -547,7 +548,13 @@ export class World {
     const off = (x, y, z, r) => new THREE.Vector3(x, y, z).normalize().multiplyScalar(r).applyQuaternion(q).add(cp);
     const sunDir = S ? this.sunScene(S, q) : new THREE.Vector3(-0.8, 0.28, 0.46).applyQuaternion(q);
     const h = this.renderer ? this.renderer.getSize(new THREE.Vector2()).y : 800;
-    if (this.planet) { this.planet.position.copy(off(-0.62, -0.25, -0.74, 3500)); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); this.planet.userData.setRes && this.planet.userData.setRes(h); }
+    // in a planet's gravity the planet sits where it really is: below us, as big as our altitude makes it
+    const O = S && S.orb && ['capture', 'orbit', 'depart', 'rendezvous', 'approach', 'docking', 'docked'].includes(S.nav.state) ? S.orb : null;
+    if (this.planet && O) {
+      const rm = Math.hypot(O.r[0], O.r[1]), d = toLocal(O, [-O.r[0], -O.r[1]]), ang = Math.asin(Math.min(0.94, OB.R / rm));
+      this.planet.position.copy(off(d[0], d[1], d[2], 3500)); this.planet.scale.setScalar(3500 * Math.sin(ang));
+      this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); this.planet.userData.setRes && this.planet.userData.setRes(h);
+    } else if (this.planet) { this.planet.scale.setScalar(this.planetKind === 'ganymede' ? 2600 : 1500); this.planet.position.copy(off(-0.62, -0.25, -0.74, 3500)); this.planet.userData.setSun(sunDir); this.planet.userData.tick(now); this.planet.userData.setRes && this.planet.userData.setRes(h); }
     if (this.earth) { this.earth.position.copy(off(0.34, 0.14, -0.93, 3900)); this.earth.userData.setSun(sunDir); this.earth.userData.tick(now); this.earth.userData.setRes && this.earth.userData.setRes(h); }
     this.stars.position.copy(cp); this.stars.quaternion.copy(q);
     this.sun.position.copy(cp).addScaledVector(sunDir, 3100);
@@ -556,8 +563,14 @@ export class World {
   // Station visible from the hull and cameras during approach / docked (ship body frame; our port is at the bow)
   updateStation(S, now) {
     const N = S.nav;
-    const near = N.state === 'orbit' || N.state === 'rendezvous' || N.state === 'approach' || N.state === 'docking' || N.state === 'docked';
-    const wid = !near ? null : N.state === 'docked' ? WAYPOINTS[N.leg].id : WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
+    // in orbit the port is only seen when it's within a few tens of km (map frame → real metres), in its true direction
+    let orbRel = null;
+    if ((N.state === 'orbit' || N.state === 'depart') && S.orb) {
+      const O = S.orb, d = O.objs.find((o) => o.dock);
+      if (d) { const st = objState(d, O.t), dr = [st.r[0] - O.r[0], st.r[1] - O.r[1]], m = Math.hypot(dr[0], dr[1]) * DSkm(WAYPOINTS[O.leg].id) * 1000; if (m < 30000) { const l = toLocal(O, dr); orbRel = new THREE.Vector3(l[0], l[1], l[2]).multiplyScalar(Math.max(250, Math.min(2500, m))); } }
+    }
+    const near = orbRel || N.state === 'rendezvous' || N.state === 'approach' || N.state === 'docking' || N.state === 'docked' || (N.state === 'orbit' && !S.orb);
+    const wid = !near ? null : N.state === 'docked' || N.state === 'depart' ? WAYPOINTS[N.leg].id : WAYPOINTS[Math.min(N.leg + 1, WAYPOINTS.length - 1)].id;
     if (wid !== this.stationId) {
       if (this.station) this.exterior.remove(this.station);
       this.station = wid ? buildStation(wid) : null; this.stationId = wid;
@@ -567,7 +580,8 @@ export class World {
     const PORT = new THREE.Vector3(...SL.bowPort);
     const q = new THREE.Quaternion(...(S.att.q || [0, 0, 0, 1])), qi = q.clone().invert();
     let rel = new THREE.Vector3(0, 0, -2000);
-    if (N.state === 'approach' && S.prox) rel = new THREE.Vector3(-S.prox.p[0], -S.prox.p[1], -S.prox.p[2]);
+    if (orbRel) rel = orbRel;
+    else if (N.state === 'approach' && S.prox) rel = new THREE.Vector3(-S.prox.p[0], -S.prox.p[1], -S.prox.p[2]);
     else if (N.state === 'rendezvous' && N.rv) rel = new THREE.Vector3(0, 0, -Math.max(250, N.rv.d));
     else if (N.state === 'docking' || N.state === 'docked') rel.set(0, 0, 0);
     this.station.position.copy(PORT).add(rel.applyQuaternion(qi));

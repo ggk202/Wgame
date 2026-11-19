@@ -3,7 +3,7 @@ import { COMPS, COMP_IDS, DECKS, SHIP, G0, KG_PER_KPA, SHELTER, WAYPOINTS, LOCKE
 import { clamp, rand, randn, chance, pick, polar, compPos, log, fx } from './util.js';
 import { assignIssue } from './repair.js';
 import { updateCombat, updateWeapons, applyHit } from './combat.js';
-import { updateFlight, beginCapture, radiatorSunFactor, stormShield, safeG, pilotDock } from './flight.js';
+import { updateFlight, beginCapture, beginDeparture, radiatorSunFactor, stormShield, safeG, pilotDock } from './flight.js';
 import { updateCrew, podState, spawnCargo } from './crew.js';
 import { ROUTE_TYPES, routeOf } from './routes.js';
 import { settleQuests, ST_ITEM_SPOTS } from './stationdata.js';
@@ -48,7 +48,7 @@ export function igniteComp(S, id, amount = 0.25) {
 export function step(S, dt) {
   if (S.phase !== 'play' || S.paused) return;
   S.t += dt;
-  S.warp = S.enc ? 1 : S.nav.state === 'transit' ? S.settings.warpBase : S.nav.state === 'rendezvous' ? 3 : 1;
+  S.warp = S.enc ? 1 : S.nav.state === 'transit' ? S.settings.warpBase : S.nav.state === 'rendezvous' ? 3 : S.orb && ['capture', 'orbit', 'depart'].includes(S.nav.state) && !S.drive.ignited ? clamp(S.orb.warp || 1, 1, 10) : 1;
   // a quick reply is owed on the radio: keep time compression low enough that the light-lag plays out in minutes
   if (S.warp > 30 && S.comms && S.comms.hails && S.comms.hails.some((h) => !h.done && h.urgent)) S.warp = 30;
   // the whole crew asleep in transit: let the hours go by
@@ -341,7 +341,7 @@ function updateDrive(S, dt, dtg) {
   D.along = along;
   D.flip = (S.att.mode === 'pro' || S.att.mode === 'retro') && S.att.err > 3 ? S.att.err : 0;
   if (prevOrient === 0 && D.orient !== 0 && N.state === 'transit') log(S, `Nose aligned ${D.orient > 0 ? 'PROGRADE' : 'RETROGRADE'}`, 'good');
-  const FLY = N.state === 'transit' || N.state === 'capture' || N.state === 'orbit' || N.state === 'rendezvous';
+  const FLY = N.state === 'transit' || N.state === 'capture' || N.state === 'orbit' || N.state === 'rendezvous' || N.state === 'depart';
   if (!FLY && D.ignited) { D.ignited = false; D.cmdG = 0; }
   N.advice = null;
   if (N.state === 'transit' && eff(S, 'navcomp') > 0 && D.locked <= 0) {
@@ -372,7 +372,7 @@ function updateDrive(S, dt, dtg) {
     N.v += along * a * dtg;
     N.x += N.v * dtg;
   }
-  updateFlight(S, dt, N.state === 'rendezvous' ? dtg : dt, along, a, { eff, applyHit, startApproach });
+  updateFlight(S, dt, N.state === 'transit' ? dt : dtg, along, a, { eff, applyHit, startApproach });
   const ve = SHIP.ve * (1 - 0.3 * M.contam) * (S.upg && S.upg.drive ? 1.04 : 1);
   M.rmass -= ((F / ve) * dtg) / 1000 + (jink ? 0.02 * dt : 0) + (S.enc && D.maneuver !== 'hold' && D.ignited ? 0.03 * dt : 0);
   M.pellets = Math.max(0, M.pellets - 0.0003 * thr * dtg);
@@ -411,13 +411,14 @@ export function depart(S) {
   // anyone still out on the station concourse hurries back aboard; the concourse's loose items stay behind
   for (const p of Object.values(S.players)) if (p.deck === STATION_DECK) { Object.assign(p, { deck: 4, x: 0, z: 3.5, y: 0, tp: (p.tp || 0) + 1 }); log(S, `${p.name} runs back aboard before the hatch seals`, 'info'); }
   S.items = S.items.filter((i) => i.deck !== STATION_DECK);
-  N.state = 'transit'; N.x = 0; N.v = 0; N.L = legLength(N.leg) * R.len;
+  N.x = 0; N.v = 0; N.L = legLength(N.leg) * R.len;
+  beginDeparture(S); // the escape burn out of the planet's gravity comes first (orbit map)
   if (R.perks.includes('escort')) { S.effects.escortT = 900; S.effects.escortRoute = true; }
   S.drive.cmdG = 0; S.drive.flip = 0;
   // undock: pushed off pointing back out along the departure axis; the next leg's target is ahead (-Z)
   S.att.q = [0, 0, 0, 1]; S.att.w = [0, 0, 0];
   if (S.att.mode === 'off' && sasModes(S).includes('hold')) S.att.mode = 'hold';
-  log(S, `Undocked from ${WAYPOINTS[N.leg].name}. Course laid in for ${WAYPOINTS[N.leg + 1].name} by the ${R.name.toLowerCase()}.${R.perks.includes('escort') ? ' A Navy frigate is taking station off our quarter.' : ''}`, 'info');
+  log(S, `Undocked from ${WAYPOINTS[N.leg].name}. Course laid in for ${WAYPOINTS[N.leg + 1].name} by the ${R.name.toLowerCase()}: first the escape burn — the Navigation orbit map shows where.${R.perks.includes('escort') ? ' A Navy frigate is taking station off our quarter.' : ''}`, 'info');
   S.story.nextAt = S.t + 60;
   return true;
 }

@@ -7,7 +7,8 @@ import { fireRail, launchTorpedo, launchSRM, deployChaff, startEncounter, applyH
 import { castVote, pirateDemand, fireEvent } from './story.js';
 import { EVENTS } from './events.js';
 import { PARTS, PART_IDS, repairNeeds, missingParts, moduleOf } from './repair.js';
-import { beginRendezvous, ORBIT } from './flight.js';
+import { beginRendezvous, ORBIT, distKm } from './flight.js';
+import { OB } from './orbit.js';
 import { BUNKS, bunkPos, BUNK_REACH, EXPERIMENTS, SCI_COST, BAY_IDS, replyHail, podState, POD, POD_CRADLE, deliverCargo, SCOUT } from './crew.js';
 import { EXT, AIRLOCK } from './config.js';
 import { ANCHORS } from './hull.js';
@@ -231,7 +232,7 @@ export function applyAction(S, pid, a, args = {}) {
       if (!at(S, p, ['helm', 'comms'])) return;
       if (N.state !== 'orbit') return err('Not in orbit');
       if (S.tutorial) { startApproach(S); return; }
-      if ((N.ecc || 0) > ORBIT.ecc) return err(`Orbit too eccentric (e=${(N.ecc || 0).toFixed(2)}). Burn retrograde at periapsis to circularise first.`);
+      if (S.orb) { const P = S.orb.plan; if (!P || P.step !== 'zone') return err(`Traffic control: intercept ${WAYPOINTS[N.leg + 1].name.split(',')[0]} first. Get inside its control zone (under ${Math.round(distKm(S.orb, OB.handD))} km, below ${OB.handV} m/s relative) using the Navigation orbit map.`); }
       if (N.holdT > 0) return err(`Traffic control: hold for ${Math.ceil(N.holdT)} s`);
       if (N.trafficLate) { N.trafficLate = false; N.holdT = 120; log(S, 'Traffic control: no flight plan on file for Wolfram. Hold 2 minutes for slot allocation.', 'warn'); return; }
       beginRendezvous(S); return;
@@ -242,6 +243,14 @@ export function applyAction(S, pid, a, args = {}) {
     case 'helm.depart':
       if (!at(S, p, ['helm', 'comms'])) return;
       if (!depart(S)) err('Cannot depart'); return;
+    case 'nav.owarp':
+      if (!at(S, p, ['navcomp', 'helm'])) return;
+      if (!S.orb) return;
+      S.orb.warp = [1, 2, 5, 10].includes(+args.w) ? +args.w : 1; return;
+    case 'nav.target':
+      if (!at(S, p, ['navcomp', 'helm'])) return;
+      if (!S.orb || !S.orb.objs.some((o) => o.id === args.id)) return;
+      S.orb.tgt = args.id; return;
     case 'nav.plan':
       if (!at(S, p, ['navcomp', 'helm'])) return;
       N.plan.cruise = clamp(+args.cruise || N.plan.cruise, 50, 2000);

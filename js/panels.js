@@ -14,9 +14,11 @@ import { ROUTE_TYPES, routeOptions, routeCurve } from './routes.js';
 import { stationNpcs, questOffers } from './stationdata.js';
 import { projBodyDir } from './combat.js';
 import { bar, btn, cls, esc } from './ui.js';
+import { drawOrbitMap } from './orbitmap.js';
+import { OB, DSkm } from './orbit.js';
 
 const kmps = (v) => (v / 1000).toFixed(1) + ' km/s';
-const stateName = { transit: 'IN TRANSIT', capture: 'CAPTURE (HYPERBOLIC)', orbit: 'PARKING ORBIT', rendezvous: 'RENDEZVOUS', approach: 'DOCKING APPROACH', docking: 'LATCHING', docked: 'DOCKED' };
+const stateName = { depart: 'DEPARTURE (ESCAPE BURN)', transit: 'IN TRANSIT', capture: 'CAPTURE (HYPERBOLIC)', orbit: 'PARKING ORBIT', rendezvous: 'RENDEZVOUS', approach: 'DOCKING APPROACH', docking: 'LATCHING', docked: 'DOCKED' };
 const destName = (S) => WAYPOINTS[Math.min(S.nav.leg + 1, WAYPOINTS.length - 1)].name;
 
 function flightBlock(B) {
@@ -66,21 +68,27 @@ function drawRouteMap(g, S, w, h) {
 }
 
 // What the pilot needs right now: capture countdown, orbit trim, rendezvous profile, rocks, structure, burn advice
+// the 3D orbit map plus its controls (time compression, targets)
+function orbitBlock(B, h) {
+  B.canvas(560, h, (g, S, w, hh) => drawOrbitMap(g, S, w, hh, (a, args) => B.ctx.act(a, args)));
+  B.seg('Time', [{ v: 1, l: '×1' }, { v: 2, l: '×2' }, { v: 5, l: '×5' }, { v: 10, l: '×10' }], (S) => (S.orb ? S.orb.warp || 1 : 1), 'nav.owarp', (v) => ({ w: v }), (S) => !!S.orb && ['capture', 'orbit', 'depart'].includes(S.nav.state) && !S.drive.ignited && !S.enc);
+  B.html((S) => {
+    if (!S.orb || S.nav.state !== 'orbit') return '';
+    const O = S.orb, km = DSkm(WAYPOINTS[O.leg].id);
+    return `<div class="kv"><label>Target</label><span>${O.objs.map((o) => `<button class="btn ${O.tgt === o.id ? 'sel' : ''}" data-act="nav.target" data-args='{"id":"${o.id}"}'>${esc(o.name)}${o.dock ? ' ⚓' : ''}</button>`).join(' ')}</span></div>
+      <div class="note">Intercept the port (⚓): park in a circular orbit, burn at the <b>transfer window</b> (the blue mark), trim with a <b>correction burn</b> (SAS Maneuver), then brake (SAS Target-retro) into the control zone — under ${Math.round(OB.handD * km)} km and ${OB.handV} m/s. Traffic control flies you the last 10 km to the docking hold.</div>`;
+  });
+  B.note((S) => (S.nav.state === 'depart' ? 'Departure: burn prograde at the <b>ejection mark</b> so the escape hyperbola leaves toward the next port (the dashed line). A late or early burn means a longer trip.' : S.nav.state === 'capture' ? 'Arrival: the yellow line is our hyperbola. Fix a low periapsis with a radial-out burn early, then burn retrograde centred on periapsis until the orbit closes.' : ''));
+}
 function directorHTML(S) {
   const N = S.nav, D = S.drive, out = [];
   const row = (k, v, c = '') => `<div class="kv"><label>${k}</label><b class="${c}">${v}</b></div>`;
-  if (N.state === 'capture' && N.cap) {
-    const C = N.cap, tPe = C.tPe - C.t, k = C.dvEff / C.dvNeed;
-    out.push(`<h4 class="dir">CAPTURE BURN</h4>`);
-    out.push(row('Periapsis', tPe > 0 ? `T−${Math.ceil(tPe)} s` : `T+${Math.ceil(-tPe)} s`, Math.abs(tPe) < CAP.window ? 'good' : tPe < -40 ? 'bad' : 'warn'));
-    out.push(row('Burn window', Math.abs(tPe) < CAP.window ? `<b class="good">OPEN</b> · efficiency ${pct(capEff(tPe))}` : tPe > 0 ? `opens in ${Math.ceil(tPe - CAP.window)} s · efficiency now ${pct(capEff(tPe))}` : `closed · efficiency ${pct(capEff(tPe))}`));
-    out.push(`<div class="kv"><label>Capture Δv</label>${bar(Math.min(1, k), k >= 1 ? 'good' : k > 0.55 ? 'warn' : 'bad', `${(C.dvEff / 1000).toFixed(2)} / ${(C.dvNeed / 1000).toFixed(2)} km/s`)}</div>`);
-    out.push(`<div class="note">Point <b>RETROGRADE</b> (SAS Retro), ignite near periapsis and burn until the bar is full. Burning off-centre wastes Δv (Oberth effect); too little leaves an eccentric orbit or a missed capture.</div>`);
-  }
-  if (N.state === 'orbit') {
-    const e = N.ecc || 0, dtPe = Math.abs(N.peT) < ORBIT.period / 2 ? N.peT : N.peT - ORBIT.period;
-    out.push(row('Orbit', `e = ${e.toFixed(3)}${e > ORBIT.ecc ? ` — circularise below ${ORBIT.ecc}` : ' — circular, cleared for approach'}`, e > ORBIT.ecc ? 'warn' : 'good'));
-    if (e > ORBIT.ecc) out.push(row('Next periapsis', Math.abs(dtPe) < ORBIT.window ? '<b class="good">BURN RETROGRADE NOW</b>' : `in ${Math.ceil(dtPe > 0 ? dtPe : dtPe + ORBIT.period)} s`, Math.abs(dtPe) < ORBIT.window ? 'good' : ''));
+  if (S.orb && ['capture', 'orbit', 'depart'].includes(N.state)) {
+    const P = S.orb.plan;
+    out.push(`<h4 class="dir">${N.state === 'capture' ? 'CAPTURE' : N.state === 'depart' ? 'ESCAPE' : 'ORBIT'} — FLIGHT COMPUTER</h4>`);
+    if (P && P.text) out.push(`<div class="note ${P.burn ? 'good' : ''}"><b>${esc(P.text)}</b></div>`);
+    if (N.state === 'capture' && N.cap) { const C = N.cap, k = C.dvEff / C.dvNeed; out.push(`<div class="kv"><label>Capture</label>${bar(Math.min(1, k), k >= 1 ? 'good' : k > 0.55 ? 'warn' : 'bad', `${Math.round(C.dvEff)} / ${C.dvNeed} m/s`)}</div>`); }
+    out.push(`<div class="note">Open the <b>Navigation → Orbit map</b> (or Helm → Orbit) to see the trajectory, apoapsis, periapsis, the port and the closest approach. SAS modes Radial, Target-retro, Station and Maneuver point for you.</div>`);
     if (N.holdT > 0) out.push(row('Traffic hold', `${Math.ceil(N.holdT)} s`, 'warn'));
   }
   if (N.state === 'rendezvous' && N.rv) {
@@ -169,13 +177,15 @@ export const PANELS = {
       B.html(directorHTML);
       B.section('Attitude');
       B.canvas(560, 230, drawAttitude);
-      B.seg('SAS', [{ v: 'off', l: 'Off' }, { v: 'hold', l: 'Hold' }, { v: 'pro', l: 'Prograde' }, { v: 'retro', l: 'Retro' }, { v: 'target', l: 'Target' }, { v: 'shield', l: 'Stern to Sun' }, { v: 'sun', l: 'Nose to Sun' }, { v: 'dock', l: 'Dock align' }], (S) => S.att.mode, 'att.mode', (v) => ({ m: v }), (S, v) => sasModes(S).includes(v));
+      B.seg('SAS', [{ v: 'off', l: 'Off' }, { v: 'hold', l: 'Hold' }, { v: 'pro', l: 'Prograde' }, { v: 'retro', l: 'Retro' }, { v: 'target', l: 'Target' }, { v: 'shield', l: 'Stern to Sun' }, { v: 'sun', l: 'Nose to Sun' }, { v: 'dock', l: 'Dock align' }, { v: 'radout', l: 'Radial out' }, { v: 'radin', l: 'Radial in' }, { v: 'tret', l: 'Target-retro' }, { v: 'tlos', l: 'Station' }, { v: 'node', l: 'Maneuver' }], (S) => S.att.mode, 'att.mode', (v) => ({ m: v }), (S, v) => sasModes(S).includes(v));
       B.pad('Rotate (RCS)', [['▲ NOSE UP S', 'r', 0, 1], ['▼ NOSE DN W', 'r', 0, -1], ['◀ YAW A', 'r', 1, 1], ['YAW D ▶', 'r', 1, -1], ['⟲ ROLL Q', 'r', 2, 1], ['ROLL E ⟳', 'r', 2, -1]]);
       B.note((S) => `Keys while seated: <b>W/S</b> pitch · <b>A/D</b> yaw · <b>Q/E</b> roll · <b>X</b> kill rotation${S.nav.state === 'approach' ? ' · <b>I/K</b> forward/back · <b>J/L</b> left/right · <b>U/O</b> up/down' : ''}. ${S.settings.sas === 'none' ? 'No SAS on this difficulty: every rotation you start, you must stop yourself.' : S.settings.sas === 'hold' ? 'SAS can only damp rotation (Hold). Pointing is up to you.' : ''}`);
+      B.section('Orbit');
+      orbitBlock(B, 300);
       B.section('Flight');
       flightBlock(B);
       B.buttons([
-        { label: 'Ignite drive', act: 'helm.ignite', enabled: (S) => !S.drive.ignited && ['transit', 'capture', 'orbit', 'rendezvous'].includes(S.nav.state) },
+        { label: 'Ignite drive', act: 'helm.ignite', enabled: (S) => !S.drive.ignited && ['transit', 'capture', 'orbit', 'rendezvous', 'depart'].includes(S.nav.state) },
         { label: 'Cut drive', act: 'helm.cutoff', cls: 'red', enabled: (S) => S.drive.ignited },
         { label: 'Flip 180° (SAS)', act: 'helm.flip', enabled: (S) => S.drive.flip <= 0 && S.nav.state === 'transit' && sasModes(S).includes('pro') },
       ]);
@@ -213,6 +223,10 @@ export const PANELS = {
   nav: {
     title: 'NAVIGATION',
     build(B) {
+      B.kv('Status', (S) => `${stateName[S.nav.state]}${S.nav.state === 'docked' ? ' — ' + WAYPOINTS[S.nav.leg].name : ' → ' + destName(S)}`);
+      B.section('Orbit map');
+      orbitBlock(B, 340);
+      B.section('Route & system');
       // route choice for the next leg, FTL-style: shown while docked, and as a reminder of the chosen route in flight
       B.canvas(560, 250, drawRouteMap, (S) => S.nav.state === 'docked' && S.nav.leg < WAYPOINTS.length - 1);
       B.html((S) => {
@@ -734,14 +748,18 @@ function drawAttitude(g, S, w, h) {
     g.stroke(); g.font = '10px monospace'; g.fillText(label, x + 10, y - 8);
   };
   mark([0, 0, -1], S.nav.state === 'approach' ? '#9dff7a' : '#ffc27a', S.nav.state === 'approach' ? 'port' : 'pro', S.nav.state === 'approach' ? 'PORT' : 'PRO');
-  const cap = S.nav.state === 'capture' && S.nav.cap;
-  const ecc = S.nav.state === 'orbit' && (S.nav.ecc || 0) > ORBIT.ecc;
-  if (cap || ecc) { // the burn marker: retrograde, with the countdown to periapsis
-    const tPe = cap ? S.nav.cap.tPe - S.nav.cap.t : (Math.abs(S.nav.peT) < ORBIT.period / 2 ? S.nav.peT : S.nav.peT - ORBIT.period);
-    const open = Math.abs(tPe) < (cap ? CAP.window : ORBIT.window), [x, y] = proj([0, 0, 1]);
-    g.strokeStyle = open ? '#9dff7a' : '#ffd23f'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, 13 + (open ? Math.sin(Date.now() / 120) * 2 : 0), 0, 7); g.stroke();
-    g.fillStyle = open ? '#9dff7a' : '#ffd23f'; g.font = 'bold 11px monospace'; g.fillText(`BURN ${tPe > 0 ? 'T−' + Math.ceil(tPe) : 'T+' + Math.ceil(-tPe)}s`, x + 15, y + 14);
-  } else mark([0, 0, 1], '#a8581a', 'retro', 'RETRO');
+  // orbit: target markers and the flight computer's next burn
+  const L = S.orb && S.orb.loc, P = S.orb && S.orb.plan;
+  if (L && L.tret) { mark(L.tret, '#40c8ff', 'retro', 'TGT−'); mark([-L.tret[0], -L.tret[1], -L.tret[2]], '#2a7a9a', 'pro', 'TGT+'); }
+  if (L && L.tlos) mark(L.tlos, '#ffb040', 'tgt', 'STN');
+  if (L && L.node) mark(L.node, '#40c8ff', 'tgt', 'NODE');
+  const pdir = P && P.mode && ({ pro: [0, 0, -1], retro: [0, 0, 1], radout: [0, 1, 0], radin: [0, -1, 0] }[P.mode] || (L && L[P.mode]));
+  if (pdir && P.tBurn < 90) {
+    const [x, y] = proj(pdir), now = P.burn;
+    g.strokeStyle = now ? '#9dff7a' : '#ffd23f'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, 13 + (now ? Math.sin(Date.now() / 120) * 2 : 0), 0, 7); g.stroke();
+    g.fillStyle = now ? '#9dff7a' : '#ffd23f'; g.font = 'bold 11px monospace'; g.fillText(now ? `BURN ${P.dv.toFixed(0)} m/s` : `BURN T−${Math.ceil(P.tBurn)}s`, x + 15, y + 14);
+  }
+  if (!pdir || pdir[2] !== 1) mark([0, 0, 1], '#a8581a', 'retro', 'RETRO');
   if (S.att.sunDir) { const [x, y, ang] = proj(S.att.sunDir); if (ang < Math.PI * 0.98) { g.fillStyle = '#ffe070'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); g.strokeStyle = '#ffe070'; g.beginPath(); g.arc(x, y, 9, 0, 7); g.stroke(); g.font = '10px monospace'; g.fillText('SUN', x + 11, y + 4); } }
   if (S.enc) for (const e of S.enc.enemies) if (!e.dead && !e.gone) mark(e.dir, e.id === S.sensors.lock ? '#ff3b2f' : '#ffd23f', 'tgt', e.id === S.sensors.lock ? 'TGT' : '');
   const up = proj([0, 1, 0]); g.fillStyle = '#7a4a20'; g.font = '10px monospace'; g.fillText('UP', up[0] - 6, up[1] + 3);

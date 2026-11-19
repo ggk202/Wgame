@@ -279,9 +279,9 @@ export class HUD {
       navLine = `→ ${dest.name.split(',')[0]} · ${fmtDist(rem)} · ${(N.v / 1000).toFixed(0)} km/s${eta > 0 && eta < 1e9 ? ` · ETA ${fmtGameTime(eta)}` : ''}`;
     } else if (N.state === 'docked') navLine = `DOCKED at ${WAYPOINTS[N.leg].name.split(',')[0]}`;
     else if (N.state === 'approach' && S.prox) navLine = `APPROACH ${Math.max(0, S.prox.p[2]).toFixed(0)} m · ${(-S.prox.v[2]).toFixed(2)} m/s · off-axis ${Math.hypot(S.prox.p[0], S.prox.p[1]).toFixed(1)} m`;
-    else if (N.state === 'capture' && N.cap) { const t = N.cap.tPe - N.cap.t; navLine = `CAPTURE — periapsis ${t > 0 ? 'T−' + Math.ceil(t) : 'T+' + Math.ceil(-t)} s · ${Math.round((N.cap.dvEff / N.cap.dvNeed) * 100)}% of capture Δv`; }
+    else if (N.state === 'capture' && N.cap) { const t = N.cap.tPe - N.cap.t; navLine = `CAPTURE — periapsis ${t > 0 ? 'T−' + Math.ceil(t) : 'T+' + Math.ceil(-t)} s · ${Math.round((N.cap.dvEff / N.cap.dvNeed) * 100)}% of capture Δv${S.orb && S.orb.plan && S.orb.plan.step === 'raise' ? ' · PERIAPSIS LOW: RADIAL OUT' : ''}`; }
     else if (N.state === 'rendezvous' && N.rv) navLine = `RENDEZVOUS ${(N.rv.d / 1000).toFixed(2)} km · closing ${N.rv.vc.toFixed(1)} m/s${N.slotT > 0 ? ` · slot ${Math.ceil(N.slotT)} s` : ''}`;
-    else if (N.state === 'orbit') navLine = (N.ecc || 0) > 0.08 ? `ORBIT e=${(N.ecc || 0).toFixed(2)} — circularise at periapsis` : `ORBIT — request approach at the helm`;
+    else if (N.state === 'orbit' || N.state === 'depart') navLine = S.orb && S.orb.plan && S.orb.plan.text ? S.orb.plan.text.split(/[.:—]/)[0] + (S.orb.plan.burn ? ' · BURNING' : isFinite(S.orb.plan.tBurn) ? ` · burn T−${Math.ceil(S.orb.plan.tBurn)} s` : '') + ' · orbit map: Navigation' : `ORBIT — request approach at the helm`;
     else navLine = `DOCKING: latches driving…`;
     const pw = S.power;
     const battPct = S.battery.charge / (pw.cap || SHIP.batteryMWh);

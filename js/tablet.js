@@ -196,7 +196,8 @@ export class Tablet {
       let h = head + `<div>STATE: ${N.state.toUpperCase()} → ${dest}</div><div>LEG ${N.leg + 1}/${WAYPOINTS.length - 1}${N.state === 'transit' ? ` · ${pct((N.x / N.L) * 100)}` : ''}</div>`;
       h += `<div>DRIVE: ${S.drive.ignited ? S.drive.g.toFixed(2) + ' G' : 'COLD'} · SAS ${S.att.mode.toUpperCase()}</div><div>RM ${S.mass.rmass.toFixed(0)} T</div>`;
       if (N.cap) h += `<div class="y">CAPTURE: PE T${N.cap.tPe - N.cap.t > 0 ? '−' : '+'}${Math.abs(Math.round(N.cap.tPe - N.cap.t))}s · ${pct((N.cap.dvEff / N.cap.dvNeed) * 100)}</div>`;
-      if (N.state === 'orbit') h += `<div>ORBIT e=${(N.ecc || 0).toFixed(2)}</div>`;
+      if (N.state === 'orbit' || N.state === 'depart') h += `<div>ORBIT e=${(N.ecc || 0).toFixed(2)}${S.orb && S.orb.plan ? ` · ${String(S.orb.plan.step || '').toUpperCase()}` : ''}</div>`;
+      if (S.orb && S.orb.plan && S.orb.plan.text) h += `<div class="y">${S.orb.plan.text.slice(0, 64)}</div>`;
       if (N.rv) h += `<div class="y">RNDZ ${(N.rv.d / 1000).toFixed(2)} KM @ ${N.rv.vc.toFixed(1)} M/S</div>`;
       if (N.slotT > 0) h += `<div class="${N.slotT < 60 ? 'r' : 'y'}">SLOT ${Math.ceil(N.slotT)} S</div>`;
       if (S.effects.chunk) h += `<div class="r">ROCK! IMPACT ${Math.ceil(S.effects.chunk.t)} S</div>`;
